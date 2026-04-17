@@ -38,7 +38,6 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
     def __init__(self, scen, *args, **kwargs):
         super().__init__(scen)
         self.default_factor_prefix = os.environ.get("INTRADAY_FACTOR_PREFIX", "qa_intra")
-        self.upload_chunk_size = int(os.environ.get("INTRADAY_UPLOAD_CHUNK_SIZE", "500"))
 
     def _build_runtime_factor_name(self, factor_name: str) -> str:
         prefix = self.default_factor_prefix
@@ -149,10 +148,7 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
 
         factor = Factor(runtime_factor_name)
         factor.create(category, description)
-
-        for start_idx in range(0, len(upload_df), self.upload_chunk_size):
-            part = upload_df.iloc[start_idx:start_idx + self.upload_chunk_size].copy()
-            factor.upload_df(part.drop(columns=["factor_name"]))
+        factor.upload_df(upload_df.drop(columns=["factor_name"]))
 
         conf = configure(config_name).set_slicing_date(
             analysis_start,
