@@ -21,7 +21,16 @@ from quantaalpha.llm.client import APIBackend
 from quantaalpha.core.utils import multiprocessing_wrapper
 from quantaalpha.core.conf import RD_AGENT_SETTINGS
 
-code_template = CodeTemplate(template_path=Path(__file__).parent / "template.jinjia2")
+
+def _resolve_template_path(scen=None) -> Path:
+    if scen is not None and scen.__class__.__module__.startswith("quantaalpha.intraday"):
+        intraday_path = Path(__file__).parents[2] / "intraday" / "coder" / "template_intraday.jinjia2"
+        if not intraday_path.exists():
+            raise FileNotFoundError(f"Intraday template not found: {intraday_path}")
+        return intraday_path
+    return Path(__file__).parent / "template.jinjia2"
+
+
 implement_prompts = Prompts(file_path=Path(__file__).parent / "prompts.yaml")
 
 class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
@@ -29,6 +38,7 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
         super().__init__(*args, **kwargs)
         self.num_loop = 0
         self.haveSelected = False
+        self.code_template = CodeTemplate(template_path=_resolve_template_path(getattr(self, "scen", None)))
 
 
     def error_summary(
@@ -204,6 +214,7 @@ class FactorParsingStrategy(MultiProcessEvolvingStrategy):
         super().__init__(*args, **kwargs)
         self.num_loop = 0
         self.haveSelected = False
+        self.code_template = CodeTemplate(template_path=_resolve_template_path(getattr(self, "scen", None)))
 
     def extract_expr(self, code_str: str) -> str:
         """Extract expr from code (expr = \"...\" or expr = '...')."""
@@ -247,7 +258,7 @@ class FactorParsingStrategy(MultiProcessEvolvingStrategy):
         queried_former_failed_knowledge_to_render = queried_former_failed_knowledge
         
         if len(queried_former_failed_knowledge) == 0:
-            rendered_code = code_template.render(
+            rendered_code = self.code_template.render(
                 expression=target_task.factor_expression, 
                 factor_name=target_task.factor_name 
             )
@@ -340,7 +351,7 @@ class FactorParsingStrategy(MultiProcessEvolvingStrategy):
                     )["expr"]
                     
                     # Render code template with new expression
-                    rendered_code = code_template.render(
+                    rendered_code = self.code_template.render(
                         expression=expr, 
                         factor_name=target_task.factor_name 
                     )
@@ -365,6 +376,7 @@ class FactorRunningStrategy(MultiProcessEvolvingStrategy):
         super().__init__(*args, **kwargs)
         self.num_loop = 0
         self.haveSelected = False
+        self.code_template = CodeTemplate(template_path=_resolve_template_path(getattr(self, "scen", None)))
 
 
     def implement_one_task(
@@ -373,7 +385,7 @@ class FactorRunningStrategy(MultiProcessEvolvingStrategy):
         queried_knowledge: CoSTEERQueriedKnowledge,
     ) -> str:
 
-        rendered_code = code_template.render(
+        rendered_code = self.code_template.render(
             expression=target_task.factor_expression, 
             factor_name=target_task.factor_name 
         )

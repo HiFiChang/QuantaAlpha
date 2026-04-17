@@ -1,3 +1,4 @@
+import sys
 from typing import Optional
 
 from quantaalpha.coder.costeer.config import CoSTEERSettings
@@ -22,7 +23,7 @@ class FactorCoSTEERSettings(CoSTEERSettings):
     select_method: str = "random"
     """Method for the selection of factors implementation"""
 
-    python_bin: str = "python"
+    python_bin: str = sys.executable
     """Path to the Python binary"""
     
     factor_zoo_path: Optional[str] = None

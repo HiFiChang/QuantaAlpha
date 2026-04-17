@@ -38,6 +38,17 @@ from functools import wraps
 
 # Decorator: check stop_event before invoking the function
 
+
+def _log_component_meta(obj, tag: str):
+    logger.log_object(
+        {
+            "class": obj.__class__.__name__,
+            "module": obj.__class__.__module__,
+        },
+        tag=tag,
+    )
+
+
 def stop_event_check(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -66,6 +77,7 @@ class AlphaAgentLoop(LoopBase, metaclass=LoopMeta):
         quality_gate_config: dict = None,
     ):
         with logger.tag("init"):
+            self.PROP_SETTING = PROP_SETTING
             self.use_local = use_local
             # Store initial direction for factor provenance
             self.potential_direction = potential_direction
@@ -100,7 +112,7 @@ class AlphaAgentLoop(LoopBase, metaclass=LoopMeta):
                        f"redundancy={'on' if redundancy_enabled else 'off'}")
                 
             scen: Scenario = import_class(PROP_SETTING.scen)(use_local=use_local)
-            logger.log_object(scen, tag="scenario")
+            _log_component_meta(scen, tag="scenario")
 
             # If strategy suffix is set, append it to the direction
             effective_direction = potential_direction
@@ -108,33 +120,67 @@ class AlphaAgentLoop(LoopBase, metaclass=LoopMeta):
                 effective_direction = (potential_direction or "") + "\n" + strategy_suffix
             
             self.hypothesis_generator: HypothesisGen = import_class(PROP_SETTING.hypothesis_gen)(scen, effective_direction)
-            logger.log_object(self.hypothesis_generator, tag="hypothesis generator")
+            _log_component_meta(self.hypothesis_generator, tag="hypothesis generator")
 
             # Pass consistency check config into factor constructor
             self.factor_constructor: Hypothesis2Experiment = import_class(PROP_SETTING.hypothesis2experiment)(
                 consistency_enabled=consistency_enabled
             )
-            logger.log_object(self.factor_constructor, tag="experiment generation")
+            _log_component_meta(self.factor_constructor, tag="experiment generation")
 
             self.coder: Developer = import_class(PROP_SETTING.coder)(scen)
-            logger.log_object(self.coder, tag="coder")
+            _log_component_meta(self.coder, tag="coder")
             
             self.runner: Developer = import_class(PROP_SETTING.runner)(scen)
-            logger.log_object(self.runner, tag="runner")
+            _log_component_meta(self.runner, tag="runner")
 
             self.summarizer: HypothesisExperiment2Feedback = import_class(PROP_SETTING.summarizer)(scen)
-            logger.log_object(self.summarizer, tag="summarizer")
+            _log_component_meta(self.summarizer, tag="summarizer")
             self.trace = Trace(scen=scen)
             
             global STOP_EVENT
             STOP_EVENT = stop_event
             super().__init__()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for attr in (
+            "hypothesis_generator",
+            "factor_constructor",
+            "coder",
+            "runner",
+            "summarizer",
+        ):
+            state.pop(attr, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._restore_runtime_components()
+
+    def _restore_runtime_components(self):
+        scen = self.trace.scen
+        consistency_enabled = self.quality_gate_config.get("consistency_enabled", False)
+        effective_direction = self.potential_direction
+        if self.strategy_suffix:
+            effective_direction = (self.potential_direction or "") + "\n" + self.strategy_suffix
+
+        self.hypothesis_generator = import_class(self.PROP_SETTING.hypothesis_gen)(scen, effective_direction)
+        self.factor_constructor = import_class(self.PROP_SETTING.hypothesis2experiment)(
+            consistency_enabled=consistency_enabled
+        )
+        self.coder = import_class(self.PROP_SETTING.coder)(scen)
+        self.runner = import_class(self.PROP_SETTING.runner)(scen)
+        self.summarizer = import_class(self.PROP_SETTING.summarizer)(scen)
+
     @classmethod
     def load(cls, path, use_local: bool = True):
         """Load existing session."""
         instance = super().load(path)
         instance.use_local = use_local
+        if hasattr(instance, "trace") and getattr(instance.trace, "scen", None) is not None:
+            instance.trace.scen.use_local = use_local
+        instance._restore_runtime_components()
         logger.info(f"Loaded AlphaAgentLoop, backtest in {'local' if use_local else 'Docker'}")
         return instance
 
@@ -275,28 +321,52 @@ class BacktestLoop(LoopBase, metaclass=LoopMeta):
     @measure_time
     def __init__(self, PROP_SETTING: BaseFacSetting, factor_path=None):
         with logger.tag("init"):
+            self.PROP_SETTING = PROP_SETTING
 
             self.factor_path = factor_path
 
             scen: Scenario = import_class(PROP_SETTING.scen)()
-            logger.log_object(scen, tag="scenario")
+            _log_component_meta(scen, tag="scenario")
 
             self.hypothesis_generator: HypothesisGen = import_class(PROP_SETTING.hypothesis_gen)(scen)
-            logger.log_object(self.hypothesis_generator, tag="hypothesis generator")
+            _log_component_meta(self.hypothesis_generator, tag="hypothesis generator")
 
             self.factor_constructor: Hypothesis2Experiment = import_class(PROP_SETTING.hypothesis2experiment)(factor_path=factor_path)
-            logger.log_object(self.factor_constructor, tag="experiment generation")
+            _log_component_meta(self.factor_constructor, tag="experiment generation")
 
             self.coder: Developer = import_class(PROP_SETTING.coder)(scen, with_feedback=False, with_knowledge=False, knowledge_self_gen=False)
-            logger.log_object(self.coder, tag="coder")
+            _log_component_meta(self.coder, tag="coder")
             
             self.runner: Developer = import_class(PROP_SETTING.runner)(scen)
-            logger.log_object(self.runner, tag="runner")
+            _log_component_meta(self.runner, tag="runner")
 
             self.summarizer: HypothesisExperiment2Feedback = import_class(PROP_SETTING.summarizer)(scen)
-            logger.log_object(self.summarizer, tag="summarizer")
+            _log_component_meta(self.summarizer, tag="summarizer")
             self.trace = Trace(scen=scen)
             super().__init__()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for attr in (
+            "hypothesis_generator",
+            "factor_constructor",
+            "coder",
+            "runner",
+            "summarizer",
+        ):
+            state.pop(attr, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        scen = self.trace.scen
+        self.hypothesis_generator = import_class(self.PROP_SETTING.hypothesis_gen)(scen)
+        self.factor_constructor = import_class(self.PROP_SETTING.hypothesis2experiment)(factor_path=self.factor_path)
+        self.coder = import_class(self.PROP_SETTING.coder)(
+            scen, with_feedback=False, with_knowledge=False, knowledge_self_gen=False
+        )
+        self.runner = import_class(self.PROP_SETTING.runner)(scen)
+        self.summarizer = import_class(self.PROP_SETTING.summarizer)(scen)
 
     def factor_propose(self, prev_out: dict[str, Any]):
         """

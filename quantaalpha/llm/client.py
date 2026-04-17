@@ -627,7 +627,8 @@ class APIBackend:
 
         if finish_reason == "length":
             new_message = deepcopy(messages)
-            new_message.append({"role": "assistant", "content": response})
+            if response:
+                new_message.append({"role": "assistant", "content": response})
             new_message.append(
                 {
                     "role": "user",

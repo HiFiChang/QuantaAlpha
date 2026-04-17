@@ -1,0 +1,69 @@
+# ============================================================
+# QuantaAlpha intraday experiment configuration
+# This config switches the mining loop to the intraday integration path.
+# ============================================================
+
+framework:
+  # daily | intraday
+  mode: intraday
+
+planning:
+  enabled: true
+  num_directions: 1
+  max_attempts: 5
+  use_llm: true
+  allow_fallback: false
+  prompt_file: planning_prompts.yaml
+
+execution:
+  max_loops: 1
+  steps_per_loop: 5
+  step_n: null
+  use_local: true
+  parallel_execution: false
+  branch_log_root: log
+  branch_log_prefix: intraday_branch
+
+evolution:
+  enabled: false
+  mutation_enabled: true
+  crossover_enabled: true
+  max_rounds: 3
+  crossover_size: 2
+  crossover_n: 2
+  parallel_enabled: false
+  prefer_diverse_crossover: true
+  prompt_file: evolution_prompts.yaml
+  parent_selection_strategy: best
+  top_percent_threshold: 0.3
+  fresh_start: true
+  cleanup_on_finish: false
+
+quality_gate:
+  consistency_enabled: false
+  complexity_enabled: true
+  redundancy_enabled: true
+  consistency_strict_mode: false
+  max_correction_attempts: 3
+
+factor:
+  factors_per_hypothesis: 1
+  complexity:
+    symbol_length_threshold: 120
+    base_features_threshold: 5
+    free_args_ratio_threshold: 0.5
+  duplication:
+    enabled: true
+    threshold: 5
+    factor_zoo_path: null
+
+llm:
+  factor_mining_timeout: 999999
+  max_retries: 3
+  retry_delay: 1.0
+  json_mode_strict: true
+
+logging:
+  level: INFO
+  save_snapshots: true
+  save_trajectory_pool: true

@@ -22,6 +22,7 @@ import ctypes
 import os
 import pickle
 from quantaalpha.pipeline.settings import ALPHA_AGENT_FACTOR_PROP_SETTING
+from quantaalpha.intraday.settings import INTRADAY_FACTOR_PROP_SETTING
 from quantaalpha.pipeline.planning import generate_parallel_directions
 from quantaalpha.pipeline.planning import load_run_config
 from quantaalpha.pipeline.loop import AlphaAgentLoop
@@ -35,6 +36,15 @@ from quantaalpha.core.exception import FactorEmptyError
 from quantaalpha.log import logger
 from quantaalpha.log.time import measure_time
 from quantaalpha.llm.config import LLM_SETTINGS
+
+
+def _resolve_prop_setting(run_cfg: dict[str, Any] | None):
+    run_cfg = run_cfg or {}
+    framework_cfg = (run_cfg.get("framework") or {}) if isinstance(run_cfg, dict) else {}
+    mode = str(framework_cfg.get("mode") or os.environ.get("QUANTAALPHA_EXPERIMENT_MODE", "daily")).lower()
+    if mode == "intraday":
+        return INTRADAY_FACTOR_PROP_SETTING, mode
+    return ALPHA_AGENT_FACTOR_PROP_SETTING, "daily"
 
 
 
@@ -95,6 +105,7 @@ def _run_branch(
     log_root: str,
     log_prefix: str,
     quality_gate_cfg: dict = None,
+    prop_setting=ALPHA_AGENT_FACTOR_PROP_SETTING,
 ):
     if log_root:
         branch_name = f"{log_prefix}_{idx:02d}"
@@ -102,7 +113,7 @@ def _run_branch(
         branch_log.mkdir(parents=True, exist_ok=True)
         logger.set_trace_path(branch_log)
     model_loop = AlphaAgentLoop(
-        ALPHA_AGENT_FACTOR_PROP_SETTING,
+        prop_setting,
         potential_direction=direction,
         stop_event=None,
         use_local=use_local,
@@ -121,6 +132,7 @@ def _run_evolution_task(
     log_root: str,
     stop_event: threading.Event | None,
     quality_gate_cfg: dict[str, Any] | None = None,
+    prop_setting=ALPHA_AGENT_FACTOR_PROP_SETTING,
 ) -> dict[str, Any]:
     """
     Run a single evolution task (one small loop).
@@ -165,7 +177,7 @@ def _run_evolution_task(
 
     # Create and run loop
     model_loop = AlphaAgentLoop(
-        ALPHA_AGENT_FACTOR_PROP_SETTING,
+        prop_setting,
         potential_direction=direction,
         stop_event=stop_event,
         use_local=use_local,
@@ -197,6 +209,7 @@ def _parallel_task_worker(
     log_root: str,
     result_queue: Queue,
     task_idx: int,
+    prop_setting=ALPHA_AGENT_FACTOR_PROP_SETTING,
 ):
     """
     Worker for parallel evolution tasks. Runs one evolution task in a separate process and puts result in queue.
@@ -217,6 +230,7 @@ def _parallel_task_worker(
             user_direction=user_direction,
             log_root=log_root,
             stop_event=None,
+            prop_setting=prop_setting,
         )
         result_queue.put({
             "success": True,
@@ -261,6 +275,7 @@ def _run_tasks_parallel(
     use_local: bool,
     user_direction: str | None,
     log_root: str,
+    prop_setting=ALPHA_AGENT_FACTOR_PROP_SETTING,
 ) -> list[dict[str, Any]]:
     """
     Run multiple evolution tasks in parallel.
@@ -288,6 +303,7 @@ def _run_tasks_parallel(
                 log_root,
                 result_queue,
                 idx,
+                prop_setting,
             ),
         )
         p.start()
@@ -322,6 +338,7 @@ def run_evolution_loop(
     planning_cfg: dict[str, Any],
     stop_event: threading.Event | None = None,
     quality_gate_cfg: dict[str, Any] | None = None,
+    prop_setting=ALPHA_AGENT_FACTOR_PROP_SETTING,
 ):
     """
     Run evolution loop: Original -> Mutation -> Crossover -> Mutation -> ...
@@ -438,6 +455,7 @@ def run_evolution_loop(
                 use_local=use_local,
                 user_direction=initial_direction,
                 log_root=log_root,
+                prop_setting=prop_setting,
             )
             
             completed_tasks = []
@@ -480,6 +498,7 @@ def run_evolution_loop(
                     log_root=log_root,
                     stop_event=stop_event,
                     quality_gate_cfg=quality_gate_cfg,
+                    prop_setting=prop_setting,
                 )
                 trajectory = controller.create_trajectory_from_loop_result(
                     task=task,
@@ -547,6 +566,7 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
         config_default = _project_root / "configs" / "experiment.yaml"
         config_file = Path(config_path) if config_path else config_default
         run_cfg = load_run_config(config_file)
+        prop_setting, framework_mode = _resolve_prop_setting(run_cfg)
         planning_cfg = (run_cfg.get("planning") or {}) if isinstance(run_cfg, dict) else {}
         exec_cfg = (run_cfg.get("execution") or {}) if isinstance(run_cfg, dict) else {}
         evolution_cfg = (run_cfg.get("evolution") or {}) if isinstance(run_cfg, dict) else {}
@@ -572,6 +592,7 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
         exec_cfg["use_local"] = use_local
         
         logger.info(f"Use {'Local' if use_local else 'Docker container'} to execute factor backtest")
+        logger.info(f"Framework mode: {framework_mode}")
         
         if use_evolution and path is None:
             logger.info("="*60)
@@ -585,6 +606,7 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
                 planning_cfg=planning_cfg,
                 stop_event=stop_event,
                 quality_gate_cfg=quality_gate_cfg,
+                prop_setting=prop_setting,
             )
         
         elif path is None:
@@ -619,7 +641,16 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
                         logger.info(f"[Planning] Branch {idx}/{len(directions)} direction: {dir_text}")
                     p = Process(
                         target=_run_branch,
-                        args=(dir_text, step_n, use_local, idx, log_root if use_branch_logs else "", log_prefix),
+                        args=(
+                            dir_text,
+                            step_n,
+                            use_local,
+                            idx,
+                            log_root if use_branch_logs else "",
+                            log_prefix,
+                            quality_gate_cfg,
+                            prop_setting,
+                        ),
                     )
                     p.start()
                     procs.append(p)
@@ -635,7 +666,7 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
                         branch_log.mkdir(parents=True, exist_ok=True)
                         logger.set_trace_path(branch_log)
                     model_loop = AlphaAgentLoop(
-                        ALPHA_AGENT_FACTOR_PROP_SETTING,
+                        prop_setting,
                         potential_direction=dir_text,
                         stop_event=stop_event,
                         use_local=use_local,

@@ -12,7 +12,7 @@ from quantaalpha.factors.coder.factor import FactorTask
 from quantaalpha.core.experiment import Task, Workspace
 from quantaalpha.core.prompts import Prompts
 from quantaalpha.llm.config import LLM_SETTINGS
-from quantaalpha.llm.client import APIBackend
+from quantaalpha.llm.client import APIBackend, robust_json_parse
 
 evaluate_prompts = Prompts(file_path=Path(__file__).parent / "prompts.yaml")
 qa_evaluate_prompts = Prompts(file_path=Path(__file__).parent / "qa_prompts.yaml")
@@ -259,11 +259,16 @@ class FactorDatetimeDailyEvaluator(FactorEvaluator):
             )
 
         time_diff = pd.to_datetime(gen_df.index.get_level_values("datetime")).to_series().diff().dropna().unique()
-        if pd.Timedelta(minutes=1) in time_diff:
+        is_intraday_scenario = (
+            self.scen is not None and self.scen.__class__.__module__.startswith("quantaalpha.intraday")
+        )
+        if not is_intraday_scenario and pd.Timedelta(minutes=1) in time_diff:
             return (
                 "The generated dataframe is not daily. The implementation is definitely wrong. Please check the implementation.",
                 False,
             )
+        if is_intraday_scenario:
+            return "The generated dataframe uses a valid intraday datetime index.", True
         return "The generated dataframe is daily.", True
 
 
@@ -558,15 +563,14 @@ class FactorFinalDecisionEvaluator(FactorEvaluator):
         while attempts < max_attempts:
             try:
                 api = APIBackend() if attempts == 0 else APIBackend(use_chat_cache=False)
-                final_evaluation_dict = json.loads(
-                    api.build_messages_and_create_chat_completion(
-                        user_prompt=user_prompt,
-                        system_prompt=system_prompt,
-                        reasoning_flag=False,
-                        json_mode=True,
-                        seed=attempts,  # in case of useless retrying when cache enabled.
-                    ),
+                raw_response = api.build_messages_and_create_chat_completion(
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    reasoning_flag=False,
+                    json_mode=True,
+                    seed=attempts,  # in case of useless retrying when cache enabled.
                 )
+                final_evaluation_dict = robust_json_parse(raw_response)
                 final_decision = final_evaluation_dict["final_decision"]
                 final_feedback = final_evaluation_dict["final_feedback"]
 

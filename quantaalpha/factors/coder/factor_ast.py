@@ -415,6 +415,8 @@ def count_number_nodes(node: Node) -> int:
         return sum(count_number_nodes(arg) for arg in node.args)
     elif isinstance(node, BinaryOpNode):
         return count_number_nodes(node.left) + count_number_nodes(node.right)
+    elif isinstance(node, UnaryOpNode):
+        return count_number_nodes(node.operand)
     elif isinstance(node, ConditionalNode):
         return (count_number_nodes(node.condition) + 
                 count_number_nodes(node.true_expr) + 
@@ -459,6 +461,8 @@ def collect_unique_vars(node: Node, unique_vars: set) -> None:
     elif isinstance(node, BinaryOpNode):
         collect_unique_vars(node.left, unique_vars)
         collect_unique_vars(node.right, unique_vars)
+    elif isinstance(node, UnaryOpNode):
+        collect_unique_vars(node.operand, unique_vars)
     elif isinstance(node, ConditionalNode):
         collect_unique_vars(node.condition, unique_vars)
         collect_unique_vars(node.true_expr, unique_vars)
@@ -531,6 +535,8 @@ def collect_base_features(node: Node, base_features: set) -> None:
     elif isinstance(node, BinaryOpNode):
         collect_base_features(node.left, base_features)
         collect_base_features(node.right, base_features)
+    elif isinstance(node, UnaryOpNode):
+        collect_base_features(node.operand, base_features)
     elif isinstance(node, ConditionalNode):
         collect_base_features(node.condition, base_features)
         collect_base_features(node.true_expr, base_features)
@@ -553,6 +559,8 @@ def count_nodes(node: Node) -> int:
         return 1 + sum(count_nodes(arg) for arg in node.args)
     elif isinstance(node, BinaryOpNode):
         return 1 + count_nodes(node.left) + count_nodes(node.right)
+    elif isinstance(node, UnaryOpNode):
+        return 1 + count_nodes(node.operand)
     elif isinstance(node, ConditionalNode):
         return 1 + (count_nodes(node.condition) + 
                     count_nodes(node.true_expr) + 
