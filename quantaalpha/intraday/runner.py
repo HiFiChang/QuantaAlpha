@@ -13,6 +13,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -38,6 +39,7 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
     def __init__(self, scen, *args, **kwargs):
         super().__init__(scen)
         self.default_factor_prefix = os.environ.get("INTRADAY_FACTOR_PREFIX", "qa_intra")
+        self.local_tz = ZoneInfo("Asia/Shanghai")
 
     def _build_runtime_factor_name(self, factor_name: str) -> str:
         prefix = self.default_factor_prefix
@@ -81,8 +83,25 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
         df = df.rename(columns=rename_map)
         if "date_time" not in df.columns or "code" not in df.columns:
             raise ValueError(f"Upload dataframe missing required columns: {df.columns.tolist()}")
-        df["date"] = pd.to_datetime(df["date_time"]).dt.normalize()
+
+        date_time = pd.to_datetime(df["date_time"])
+        if getattr(date_time.dt, "tz", None) is None:
+            localized = date_time.dt.tz_localize(self.local_tz)
+        else:
+            localized = date_time.dt.tz_convert(self.local_tz)
+
+        local_naive = localized.dt.tz_localize(None)
+        df["date_time"] = local_naive.dt.strftime("%Y-%m-%d %H:%M:%S")
+        df["date"] = local_naive.dt.date
         df["factor_name"] = factor_name
+
+        times = local_naive.dt.strftime("%H:%M:%S")
+        if not ((times >= "09:30:00") & (times <= "15:00:00")).all():
+            raise ValueError(
+                "Upload dataframe contains date_time values outside the expected local trading session "
+                f"after timezone normalization. Range: {local_naive.min()} -> {local_naive.max()}"
+            )
+
         return df[["date_time", "code", "factor_value", "date", "factor_name"]]
 
     def _evaluate_uploaded_factor(
@@ -191,6 +210,7 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
                 **saved_paths,
             },
             "factor_name": runtime_factor_name,
+            "source_factor_name": factor_name,
             "status": "ok",
         }
 

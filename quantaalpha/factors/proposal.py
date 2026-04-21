@@ -414,7 +414,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
             .from_string(qa_prompt_dict["hypothesis2experiment"]["system_prompt"])
             .render(
                 targets=self.targets,
-                scenario=trace.scen.background, # get_scenario_all_desc(filtered_tag="hypothesis_and_experiment"),
+                scenario=context["scenario"],
                 experiment_output_format=context["experiment_output_format"],
             )
         )

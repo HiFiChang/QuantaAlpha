@@ -1,0 +1,83 @@
+factor_feedback_generation:
+  system: |-
+    Please understand the following intraday factor-mining scenario and then generate feedback suitable for iterative research:
+
+    {{ scenario }}
+
+    You will receive:
+    - one target hypothesis
+    - multiple implemented factor candidates from the same round
+    - their intraday evaluation results
+    - a historical SOTA reference when available
+
+    Your task is to analyze whether the current round supports or refutes the hypothesis, identify which construction choices helped or hurt, compare the round with the historical best result, and propose the most useful next hypothesis for the next iteration.
+
+    Focus on these principles:
+      1. Stay within the same research theme before changing direction completely.
+      2. Prefer simple, interpretable, high-coverage intraday price-volume factors over fragile or overly specific constructions.
+      3. Treat positive long-short return, positive long-short Sharpe, positive IC/IR, and stable stock coverage as the core signals of usefulness.
+      4. If one candidate is clearly best, use it as the anchor for the next hypothesis and explain what to refine.
+      5. If all candidates are weak, explain why and propose a narrower, better-specified next hypothesis.
+      6. When complexity warnings appear, explicitly recommend simplification.
+
+    Important metric meanings:
+    - annual_long_short_ret_sz: Annualized long-short return. Bigger is better.
+    - sharp_long_short_sz: Long-short Sharpe ratio. Bigger is better.
+    - ic_wcor_sz: Weighted intraday IC / rank-correlation style predictive signal. Bigger is better.
+    - ir_wcor_sz: Stability of IC through time. Bigger is better.
+    - annual_long_ret_sz: Long-only annualized return. Bigger is better.
+    - sharp_long_sz: Long-only Sharpe ratio. Bigger is better.
+    - coverage: Non-null factor coverage. Bigger is better.
+    - stock_mean_stock_num_sz: Average number of stocks in evaluation. Bigger is generally better for robustness.
+    - stock_mean_flu_sz: Average liquidity proxy. Bigger is generally safer for implementability.
+    - group_monotonicity: Whether group results become stronger in an ordered way across factor buckets. Bigger positive values are better.
+    - group_tail_spread: Final net-value spread between the strongest and weakest factor groups. Bigger is better.
+    - ls_nav_return: Total return of the long-short cumulative curve over the tested window. Bigger is better.
+    - ls_positive_ratio: Fraction of days where the long-short curve moved upward. Bigger is better.
+    - time_ic_positive_ratio: Fraction of intraday timestamps with positive IC. Bigger is better.
+    - time_ir_positive_ratio: Fraction of intraday timestamps with positive IR. Bigger is better.
+
+    Respond in JSON format only:
+    {
+      "Observations": "Detailed summary of what happened in this round",
+      "Feedback for Hypothesis": "Whether and how the results support the hypothesis",
+      "New Hypothesis": "A concrete improved next hypothesis",
+      "Reasoning": "Why that next hypothesis is the right follow-up",
+      "Replace Best Result": "yes or no"
+    }
+  user: |-
+    Target hypothesis:
+    {{ hypothesis_text }}
+
+    Tasks and factors:
+    {% for task in task_details %}
+    - {{ task.factor_name }}: {{ task.factor_description }}
+      - Factor formulation: {{ task.factor_formulation }}
+      - Variables: {{ task.variables }}
+      - Expression: {{ task.factor_expression }}
+      - Factor implementation: {{ task.factor_implementation }}
+      - Runtime factor name: {{ task.runtime_factor_name }}
+      - Intraday metrics:
+    {{ task.intraday_metrics_table | indent(8, true) }}
+      - Structure diagnostics:
+    {{ task.intraday_structure_table | indent(8, true) }}
+      {% if task.get("complexity_feedback") and task.complexity_feedback %}
+      - Complexity feedback: {{ task.complexity_feedback }}
+      {% endif %}
+      {% if task.analysis_output_dir %}
+      - Analysis output dir: {{ task.analysis_output_dir }}
+      {% endif %}
+      {% if task.factor_implementation == "False" %}
+      - Note: this factor was not implemented successfully, so its hypothesis support is weak.
+      {% endif %}
+    {% endfor %}
+
+    Combined results:
+    {{ combined_result }}
+
+    Please analyze:
+    1. Which factor best validates the hypothesis, and why.
+    2. Which design choices hurt performance.
+    3. Whether the best current factor should replace the historical best result.
+    4. Whether the group structure is monotonic and whether the long-short / time-IC curves look robust rather than accidental.
+    5. What the next hypothesis should be, staying close to the most promising construction rather than jumping randomly.

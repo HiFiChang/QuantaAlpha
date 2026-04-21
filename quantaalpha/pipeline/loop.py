@@ -38,6 +38,8 @@ from functools import wraps
 
 # Decorator: check stop_event before invoking the function
 
+STOP_EVENT = None
+
 
 def _log_component_meta(obj, tag: str):
     logger.log_object(
@@ -176,6 +178,8 @@ class AlphaAgentLoop(LoopBase, metaclass=LoopMeta):
     @classmethod
     def load(cls, path, use_local: bool = True):
         """Load existing session."""
+        global STOP_EVENT
+        STOP_EVENT = None
         instance = super().load(path)
         instance.use_local = use_local
         if hasattr(instance, "trace") and getattr(instance.trace, "scen", None) is not None:

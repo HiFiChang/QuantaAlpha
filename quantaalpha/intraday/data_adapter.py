@@ -16,12 +16,13 @@ lightest-weight entry point for running the intraday workflow end-to-end.
 from __future__ import annotations
 
 import argparse
+import importlib
 import io
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 import numpy as np
@@ -36,8 +37,19 @@ class ClickHouseConfig:
 
 
 def _run_clickhouse_query(query: str, cfg: ClickHouseConfig) -> pd.DataFrame:
+    client_binary = shutil.which("clickhouse-client")
+    if client_binary:
+        return _run_clickhouse_query_via_binary(query, cfg, client_binary)
+    return _run_clickhouse_query_via_python_client(query, cfg)
+
+
+def _run_clickhouse_query_via_binary(
+    query: str,
+    cfg: ClickHouseConfig,
+    client_binary: str,
+) -> pd.DataFrame:
     cmd = [
-        "clickhouse-client",
+        client_binary,
         "-h",
         cfg.host,
         "--port",
@@ -68,6 +80,75 @@ def _run_clickhouse_query(query: str, cfg: ClickHouseConfig) -> pd.DataFrame:
     return pd.read_csv(io.StringIO(result.stdout), dtype=str)
 
 
+def _run_clickhouse_query_via_python_client(query: str, cfg: ClickHouseConfig) -> pd.DataFrame:
+    clickhouse_driver = importlib.util.find_spec("clickhouse_driver")
+    if clickhouse_driver:
+        return _run_clickhouse_query_via_clickhouse_driver(query, cfg)
+
+    clickhouse_connect = importlib.util.find_spec("clickhouse_connect")
+    if clickhouse_connect:
+        if cfg.port == 9000:
+            raise RuntimeError(
+                "Only `clickhouse-connect` is installed, but port 9000 is usually the native "
+                "ClickHouse TCP interface. Install `clickhouse-driver` (or the "
+                "`clickhouse-client` binary) for port 9000, or switch to the HTTP port "
+                "(typically 8123) if you want to use `clickhouse-connect`."
+            )
+        return _run_clickhouse_query_via_clickhouse_connect(query, cfg)
+
+    raise RuntimeError(
+        "No ClickHouse client is available. Install the `clickhouse-client` binary "
+        "or add a Python client with `pip install clickhouse-driver` "
+        "(native TCP, works with port 9000) or `pip install clickhouse-connect` "
+        "(HTTP, typically port 8123)."
+    )
+
+
+def _run_clickhouse_query_via_clickhouse_driver(query: str, cfg: ClickHouseConfig) -> pd.DataFrame:
+    from clickhouse_driver import Client
+    from clickhouse_driver.errors import Error as ClickHouseDriverError
+
+    client = Client(
+        host=cfg.host,
+        port=cfg.port,
+        user=cfg.user,
+        password=cfg.password,
+    )
+    try:
+        result, columns = client.execute(query, with_column_types=True)
+    except ClickHouseDriverError as exc:
+        raise RuntimeError(f"ClickHouse query failed via clickhouse-driver: {exc}\nQuery:\n{query.strip()}") from exc
+
+    column_names = [name for name, _type in columns]
+    if not result:
+        return pd.DataFrame(columns=column_names)
+    return pd.DataFrame(result, columns=column_names, dtype=str)
+
+
+def _run_clickhouse_query_via_clickhouse_connect(query: str, cfg: ClickHouseConfig) -> pd.DataFrame:
+    import clickhouse_connect
+
+    client = clickhouse_connect.get_client(
+        host=cfg.host,
+        port=cfg.port,
+        username=cfg.user,
+        password=cfg.password,
+    )
+    try:
+        result = client.query(query)
+    except Exception as exc:
+        raise RuntimeError(
+            "ClickHouse query failed via clickhouse-connect. "
+            "If your server only exposes the native protocol, use port 9000 with "
+            "`clickhouse-client` or `clickhouse-driver`.\n"
+            f"Underlying error: {exc}\nQuery:\n{query.strip()}"
+        ) from exc
+
+    if not result.result_rows:
+        return pd.DataFrame(columns=result.column_names)
+    return pd.DataFrame(result.result_rows, columns=result.column_names, dtype=str)
+
+
 def _fetch_trade_dates(start_date: str, end_date: str, cfg: ClickHouseConfig) -> list[str]:
     query = f"""
     SELECT toString(date) AS trade_date
@@ -79,6 +160,21 @@ def _fetch_trade_dates(start_date: str, end_date: str, cfg: ClickHouseConfig) ->
     if df.empty:
         return []
     return df["trade_date"].astype(str).tolist()
+
+
+def _fetch_previous_trade_date(date_str: str, cfg: ClickHouseConfig) -> str | None:
+    query = f"""
+    SELECT toString(max(date)) AS trade_date
+    FROM stock_base.trade_dates
+    WHERE date < toDate('{date_str}')
+    """
+    df = _run_clickhouse_query(query, cfg)
+    if df.empty or "trade_date" not in df.columns:
+        return None
+    value = str(df.iloc[0]["trade_date"]).strip()
+    if not value or value.lower() == "nan":
+        return None
+    return value
 
 
 def _fetch_m1_for_date(date_str: str, cfg: ClickHouseConfig) -> pd.DataFrame:
@@ -140,9 +236,10 @@ def build_intraday_panel(
     cfg: ClickHouseConfig,
     output_path: str | Path,
 ) -> Path:
-    trade_dates = _fetch_trade_dates(start_date, end_date, cfg)
+    panel_start_date = _fetch_previous_trade_date(start_date, cfg) or start_date
+    trade_dates = _fetch_trade_dates(panel_start_date, end_date, cfg)
     if not trade_dates:
-        raise ValueError(f"No open trade dates found between {start_date} and {end_date}")
+        raise ValueError(f"No open trade dates found between {panel_start_date} and {end_date}")
 
     frames: list[pd.DataFrame] = []
     for date_str in trade_dates:
@@ -154,7 +251,7 @@ def build_intraday_panel(
             frames.append(panel_df)
 
     if not frames:
-        raise ValueError(f"No intraday data extracted between {start_date} and {end_date}")
+        raise ValueError(f"No intraday data extracted between {panel_start_date} and {end_date}")
 
     data = pd.concat(frames).sort_index()
     output_path = Path(output_path)
