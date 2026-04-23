@@ -896,34 +896,44 @@ class APIBackend:
                         tag="llm_messages",
                     )
             if json_mode or reasoning_flag:
-                # Extract JSON part
-                json_start = resp.find('{')
-                json_end = resp.rfind('}') + 1
-                resp = resp[json_start:json_end]
-                # Try parse JSON; on failure try to fix
+                raw_resp = resp
+                stripped_resp = (resp or "").strip()
+                candidate_resp = stripped_resp
+
+                if stripped_resp.startswith("{") and stripped_resp.endswith("}"):
+                    candidate_resp = stripped_resp
+                else:
+                    json_start = stripped_resp.find("{")
+                    json_end = stripped_resp.rfind("}") + 1
+                    if json_start != -1 and json_end > json_start:
+                        candidate_resp = stripped_resp[json_start:json_end]
+
+                # Try parse JSON; on failure try to fix. If it still fails,
+                # keep the original raw response so downstream callers can
+                # recover fenced code blocks or other structured outputs.
                 try:
-                    json.loads(resp)
-                except json.JSONDecodeError as e:
+                    json.loads(candidate_resp)
+                    resp = candidate_resp
+                except json.JSONDecodeError:
                     import re
-                    error_msg = str(e).lower()
-                    # Fix common JSON format issues
-                    fixed_resp = resp
-                    
+
+                    fixed_resp = candidate_resp
+
                     # Fix LaTeX backslash: \text, \frac etc. misinterpreted as escapes
                     latex_commands = ['text', 'frac', 'left', 'right', 'times', 'cdot', 'sqrt', 'sum', 'prod', 'int']
                     for cmd in latex_commands:
-                        # Replace single backslash only
                         fixed_resp = re.sub(r'(?<!\\)\\(' + cmd + r')', r'\\\\\1', fixed_resp)
-                    
+
                     # Fix other invalid escapes: \_ \{ \} etc.
                     fixed_resp = re.sub(r'(?<!\\)\\([_\{\}\[\]])', r'\\\\\1', fixed_resp)
-                    
+
                     try:
                         json.loads(fixed_resp)
                         resp = fixed_resp
                         logger.info("Fixed JSON format issues")
                     except json.JSONDecodeError as e2:
                         logger.warning(f"JSON fix failed: {e2}, using raw response")
+                        resp = raw_resp
         if self.dump_chat_cache:
             self.cache.chat_set(input_content_json, resp)
         return resp, finish_reason

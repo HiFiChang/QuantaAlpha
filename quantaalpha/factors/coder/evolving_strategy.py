@@ -33,6 +33,47 @@ def _resolve_template_path(scen=None) -> Path:
 
 implement_prompts = Prompts(file_path=Path(__file__).parent / "prompts.yaml")
 
+
+def _extract_code_from_llm_response(response: str) -> str:
+    response = (response or "").strip()
+    if not response:
+        return ""
+
+    try:
+        parsed = json.loads(response)
+        if isinstance(parsed, dict):
+            code = parsed.get("code")
+            if isinstance(code, str) and code.strip():
+                return code.strip()
+    except json.JSONDecodeError:
+        pass
+
+    fenced_patterns = [
+        r"```python\s*(.*?)```",
+        r"```py\s*(.*?)```",
+        r"```\s*(.*?)```",
+    ]
+    for pattern in fenced_patterns:
+        match = re.search(pattern, response, flags=re.DOTALL | re.IGNORECASE)
+        if match:
+            code = match.group(1).strip()
+            if code:
+                return code
+
+    if response.startswith("import ") or response.startswith("from ") or "def " in response:
+        return response
+
+    return ""
+
+
+def _extract_expr_from_code(code_str: str) -> str:
+    """Extract expr from code (expr = "..." or expr = '...')."""
+    pattern = r'expr\s*=\s*["\']([^"\']*)["\']'
+    match = re.search(pattern, code_str)
+    if match:
+        return match.group(1)
+    return ""
+
 class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -40,6 +81,8 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
         self.haveSelected = False
         self.code_template = CodeTemplate(template_path=_resolve_template_path(getattr(self, "scen", None)))
 
+    def extract_expr(self, code_str: str) -> str:
+        return _extract_expr_from_code(code_str)
 
     def error_summary(
         self,
@@ -148,19 +191,15 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
             if len(queried_similar_successful_knowledge_to_render) > 0:
                 similar_successful_factor_description = queried_similar_successful_knowledge_to_render[0].target_task.get_task_description()
                 similar_successful_expression = self.extract_expr(queried_similar_successful_knowledge_to_render[0].implementation.code)
-            
+
             user_prompt = (
                 Environment(undefined=StrictUndefined)
                 .from_string(
                     implement_prompts["evolving_strategy_factor_implementation_v2_user"],
                 )
                 .render(
-                    # factor_information_str=target_factor_task_information,
-                    # queried_similar_successful_knowledge=queried_similar_successful_knowledge_to_render,
-                    # queried_similar_error_knowledge=queried_similar_error_knowledge_to_render,
-                    # error_summary_critics=error_summary_critics,
-                    # latest_attempt_to_latest_successful_execution=latest_attempt_to_latest_successful_execution,
                     factor_information_str=target_task.get_task_description(),
+                    queried_similar_successful_knowledge=queried_similar_successful_knowledge_to_render,
                     queried_similar_error_knowledge=queried_similar_error_knowledge_to_render,
                     error_summary_critics=error_summary_critics,
                     similar_successful_factor_description=similar_successful_factor_description,
@@ -183,17 +222,14 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
             elif len(queried_similar_error_knowledge_to_render) > 0:
                 queried_similar_error_knowledge_to_render = queried_similar_error_knowledge_to_render[:-1]
         for _ in range(10):
-            try:
-                code = json.loads(
-                    APIBackend(
-                        use_chat_cache=FACTOR_COSTEER_SETTINGS.coder_use_cache
-                    ).build_messages_and_create_chat_completion(
-                        user_prompt=user_prompt, system_prompt=system_prompt, json_mode=True
-                    )
-                )["code"]
+            response = APIBackend(
+                use_chat_cache=FACTOR_COSTEER_SETTINGS.coder_use_cache
+            ).build_messages_and_create_chat_completion(
+                user_prompt=user_prompt, system_prompt=system_prompt, json_mode=True
+            )
+            code = _extract_code_from_llm_response(response)
+            if code:
                 return code
-            except json.decoder.JSONDecodeError:
-                pass
         else:
             return ""  # return empty code if failed to get code after 10 attempts
 
@@ -217,13 +253,7 @@ class FactorParsingStrategy(MultiProcessEvolvingStrategy):
         self.code_template = CodeTemplate(template_path=_resolve_template_path(getattr(self, "scen", None)))
 
     def extract_expr(self, code_str: str) -> str:
-        """Extract expr from code (expr = \"...\" or expr = '...')."""
-        pattern = r'expr\s*=\s*["\']([^"\']*)["\']'
-        match = re.search(pattern, code_str)
-        if match:
-            return match.group(1)
-        else:
-            return ""
+        return _extract_expr_from_code(code_str)
 
 
     def implement_one_task(

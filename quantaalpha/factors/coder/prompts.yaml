@@ -42,6 +42,12 @@ evolving_strategy_factor_implementation_v1_system: |-
   {{ scenario }}
   Your code is expected to align the scenario in any form which means The user needs to get the exact factor values with your code as expected.
 
+  Important execution policy:
+  - Follow the scenario's implementation contract strictly.
+  - If the scenario indicates remote SQL / ruogu execution, the main factor computation should happen inside SQL and the SQL result should already contain `factor_value`.
+  - In that case, Python should only orchestrate dates, execute SQL, concatenate daily results, normalize types/index, and write `result.h5`.
+  - Do not fetch a raw OHLCV panel into pandas and then re-implement the main rolling/ranking/zscore factor logic locally unless the scenario explicitly allows that fallback.
+
   To help you write the correct code, the user might provide multiple information that helps you write the correct code:
   1. The user might provide you the correct code to similar factors. Your should learn from these code to write the correct code.
   2. The user might provide you the failed former code and the corresponding feedback to the code. The feedback contains to the execution, the code and the factor value. You should analyze the feedback and try to correct the latest code.

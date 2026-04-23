@@ -366,7 +366,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
         return self._quality_gate
         
     def prepare_context(self, hypothesis: Hypothesis, trace: Trace, history_limit: int = DEFAULT_HISTORY_LIMIT) -> Tuple[dict | bool]:
-        scenario = trace.scen.get_scenario_all_desc()
+        scenario = trace.scen.get_scenario_all_desc(filtered_tag="hypothesis_and_experiment")
         experiment_output_format = qa_prompt_dict["factor_experiment_output_format"]
         function_lib_description = qa_prompt_dict['function_lib_description']
         hypothesis_and_feedback = render_hypothesis_and_feedback(

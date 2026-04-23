@@ -30,7 +30,7 @@ class LLMSettings(ExtendedBaseSettings):
     chat_openai_api_key: str = ""
     chat_model: str = "gpt-4-turbo"
     reasoning_model: str = ""
-    chat_max_tokens: int = 3000
+    chat_max_tokens: int = 100000
     chat_temperature: float = 0.5
     chat_stream: bool = True
     chat_seed: int | None = None

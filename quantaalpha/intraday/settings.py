@@ -17,7 +17,7 @@ class IntradayFactorBasePropSetting(BasePropSetting):
     scen: str = "quantaalpha.intraday.experiment.IntradayAlphaAgentScenario"
     hypothesis_gen: str = "quantaalpha.factors.proposal.AlphaAgentHypothesisGen"
     hypothesis2experiment: str = "quantaalpha.factors.proposal.AlphaAgentHypothesis2FactorExpression"
-    coder: str = "quantaalpha.factors.qlib_coder.QlibFactorParser"
+    coder: str = "quantaalpha.intraday.coder.IntradayFactorCoder"
     runner: str = "quantaalpha.intraday.runner.IntradayFactorRunner"
     summarizer: str = "quantaalpha.intraday.feedback.IntradayHypothesisExperiment2Feedback"
     evolving_n: int = 5

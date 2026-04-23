@@ -21,6 +21,7 @@ from quantaalpha.core.developer import Developer
 from quantaalpha.core.exception import FactorEmptyError
 from quantaalpha.log import logger
 from quantaalpha.factors.experiment import QlibFactorExperiment
+from quantaalpha.intraday.mode import get_intraday_execution_mode
 
 
 class IntradayFactorRunner(Developer[QlibFactorExperiment]):
@@ -40,6 +41,7 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
         super().__init__(scen)
         self.default_factor_prefix = os.environ.get("INTRADAY_FACTOR_PREFIX", "qa_intra")
         self.local_tz = ZoneInfo("Asia/Shanghai")
+        self.execution_mode = get_intraday_execution_mode()
 
     def _build_runtime_factor_name(self, factor_name: str) -> str:
         prefix = self.default_factor_prefix
@@ -247,6 +249,7 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
             "metrics": metrics,
             "factor_summaries": summaries,
             "evaluation_mode": "intraday",
+            "execution_mode": self.execution_mode,
             "use_local": use_local,
             "evaluated_at": time.time(),
         }
