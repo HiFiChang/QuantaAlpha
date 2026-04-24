@@ -16,6 +16,23 @@ from quantaalpha.llm.client import APIBackend, robust_json_parse
 
 evaluate_prompts = Prompts(file_path=Path(__file__).parent / "prompts.yaml")
 qa_evaluate_prompts = Prompts(file_path=Path(__file__).parent / "qa_prompts.yaml")
+INTRADAY_CODER_PROMPTS = Path(__file__).parents[2] / "intraday" / "prompts" / "factor_coder_intraday_prompts.yaml"
+
+
+def _is_intraday_scenario(scen) -> bool:
+    return scen is not None and scen.__class__.__module__.startswith("quantaalpha.intraday")
+
+
+def _get_evaluate_prompts(scen) -> Prompts:
+    if _is_intraday_scenario(scen):
+        return Prompts(file_path=INTRADAY_CODER_PROMPTS)
+    return evaluate_prompts
+
+
+def _get_qa_evaluate_prompts(scen) -> Prompts:
+    if _is_intraday_scenario(scen):
+        return Prompts(file_path=INTRADAY_CODER_PROMPTS)
+    return qa_evaluate_prompts
 
 
 class FactorEvaluator:
@@ -81,10 +98,11 @@ class FactorCodeEvaluator(FactorEvaluator):
     ):
         factor_information = target_task.get_task_information()
         code = implementation.code
+        prompt_dict = _get_qa_evaluate_prompts(self.scen)
 
         system_prompt = (
             Environment(undefined=StrictUndefined)
-            .from_string(qa_evaluate_prompts["evaluator_code_feedback_v1_system"])
+            .from_string(prompt_dict["evaluator_code_feedback_v1_system"])
             .render(
                 scenario=(
                     self.scen.get_scenario_all_desc(
@@ -104,7 +122,7 @@ class FactorCodeEvaluator(FactorEvaluator):
             user_prompt = (
                 Environment(undefined=StrictUndefined)
                 .from_string(
-                    qa_evaluate_prompts["evaluator_code_feedback_v1_user"],
+                    prompt_dict["evaluator_code_feedback_v1_user"],
                 )
                 .render(
                     factor_information=factor_information,
@@ -514,9 +532,10 @@ class FactorFinalDecisionEvaluator(FactorEvaluator):
         code_feedback: str,
         **kwargs,
     ) -> Tuple:
+        prompt_dict = _get_evaluate_prompts(self.scen)
         system_prompt = (
             Environment(undefined=StrictUndefined)
-            .from_string(evaluate_prompts["evaluator_final_decision_v1_system"])
+            .from_string(prompt_dict["evaluator_final_decision_v1_system"])
             .render(
                 scenario=(
                     self.scen.get_scenario_all_desc(target_task, filtered_tag="feature")
@@ -531,7 +550,7 @@ class FactorFinalDecisionEvaluator(FactorEvaluator):
             user_prompt = (
                 Environment(undefined=StrictUndefined)
                 .from_string(
-                    evaluate_prompts["evaluator_final_decision_v1_user"],
+                    prompt_dict["evaluator_final_decision_v1_user"],
                 )
                 .render(
                     factor_information=target_task.get_task_information(),

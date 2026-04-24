@@ -33,6 +33,7 @@ from quantaalpha.pipeline.evolution import (
     RoundPhase,
 )
 from quantaalpha.core.exception import FactorEmptyError
+from quantaalpha.core.utils import import_class
 from quantaalpha.log import logger
 from quantaalpha.log.time import measure_time
 from quantaalpha.llm.config import LLM_SETTINGS
@@ -45,6 +46,24 @@ def _resolve_prop_setting(run_cfg: dict[str, Any] | None):
     if mode == "intraday":
         return INTRADAY_FACTOR_PROP_SETTING, mode
     return ALPHA_AGENT_FACTOR_PROP_SETTING, "daily"
+
+
+def _build_planning_context(prop_setting, use_local: bool) -> str | None:
+    try:
+        scen = import_class(prop_setting.scen)(use_local=use_local)
+    except Exception as exc:
+        logger.warning(f"Failed to build planning scenario context: {exc}")
+        return None
+
+    if hasattr(scen, "get_planning_context_desc"):
+        try:
+            context = scen.get_planning_context_desc()
+            if isinstance(context, str) and context.strip():
+                return context.strip()
+        except Exception as exc:
+            logger.warning(f"Failed to get planning context from scenario: {exc}")
+            return None
+    return None
 
 
 
@@ -370,6 +389,7 @@ def run_evolution_loop(
     planning_enabled = bool(planning_cfg.get("enabled", False))
     prompt_file = planning_cfg.get("prompt_file") or "planning_prompts.yaml"
     prompt_path = Path(__file__).parent / "prompts" / str(prompt_file)
+    planning_context = _build_planning_context(prop_setting, use_local)
     
     if planning_enabled and initial_direction:
         directions = generate_parallel_directions(
@@ -379,6 +399,7 @@ def run_evolution_loop(
             max_attempts=int(planning_cfg.get("max_attempts", 5)),
             use_llm=bool(planning_cfg.get("use_llm", True)),
             allow_fallback=bool(planning_cfg.get("allow_fallback", True)),
+            planning_context=planning_context,
         )
     elif planning_enabled:
         directions = [None] * num_directions
@@ -617,6 +638,7 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
             allow_fallback = bool(planning_cfg.get("allow_fallback", True))
             prompt_file = planning_cfg.get("prompt_file") or "planning_prompts.yaml"
             prompt_path = Path(__file__).parent / "prompts" / str(prompt_file)
+            planning_context = _build_planning_context(prop_setting, use_local)
             if planning_enabled and direction:
                 directions = generate_parallel_directions(
                     initial_direction=direction,
@@ -625,6 +647,7 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
                     max_attempts=max_attempts,
                     use_llm=use_llm,
                     allow_fallback=allow_fallback,
+                    planning_context=planning_context,
                 )
             else:
                 directions = [direction] if direction else [None]

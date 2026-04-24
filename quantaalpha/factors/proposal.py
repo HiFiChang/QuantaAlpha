@@ -15,9 +15,99 @@ import os
 import pandas as pd
 from quantaalpha.log import logger
 from quantaalpha.factors.regulator.factor_regulator import FactorRegulator
+from quantaalpha.intraday.mode import INTRADAY_EXECUTION_MODE_RUOGU_SQL
 
 DEFAULT_HISTORY_LIMIT = 6
 MIN_HISTORY_LIMIT = 1
+INTRADAY_PROMPTS_DIR = Path(__file__).parents[1] / "intraday" / "prompts"
+
+
+def _is_intraday_scenario(scen: Scenario | None) -> bool:
+    return scen is not None and scen.__class__.__module__.startswith("quantaalpha.intraday")
+
+
+def _load_alpha_agent_prompts(scen: Scenario | None) -> Prompts:
+    if _is_intraday_scenario(scen):
+        return Prompts(file_path=INTRADAY_PROMPTS_DIR / "alpha_agent_prompts.yaml")
+    return Prompts(file_path=Path(__file__).parent / "prompts" / "prompts.yaml")
+
+
+def _is_intraday_codegen_scenario(scen: Scenario | None) -> bool:
+    return _is_intraday_scenario(scen) and getattr(scen, "execution_mode", None) == INTRADAY_EXECUTION_MODE_RUOGU_SQL
+
+
+def _stringify_intraday_metadata(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(v) for v in value if str(v).strip())
+    return str(value)
+
+
+def _normalize_intraday_factor_payload(factor_name: str, factor_data: dict) -> tuple[dict, list[str]]:
+    errors: list[str] = []
+
+    description = str(factor_data.get("description", "")).strip()
+    formulation = str(factor_data.get("formulation", "")).strip()
+    variables = factor_data.get("variables", {})
+    if not isinstance(variables, dict):
+        errors.append("`variables` must be an object")
+        variables = {}
+
+    data_sources = factor_data.get("data_sources", [])
+    if isinstance(data_sources, str):
+        data_sources = [data_sources]
+    elif not isinstance(data_sources, list):
+        errors.append("`data_sources` must be a list of strings")
+        data_sources = []
+
+    required_fields = factor_data.get("required_fields", [])
+    if isinstance(required_fields, str):
+        required_fields = [required_fields]
+    elif not isinstance(required_fields, list):
+        errors.append("`required_fields` must be a list of strings")
+        required_fields = []
+
+    window_unit = str(factor_data.get("window_unit", "")).strip() or "bars"
+    implementation_hints = str(factor_data.get("implementation_hints", "")).strip()
+    expression_summary = str(
+        factor_data.get("expression_summary", factor_data.get("expression", ""))
+    ).strip()
+
+    if not description:
+        errors.append("`description` is required")
+    if not formulation:
+        errors.append("`formulation` is required")
+    if len(data_sources) == 0:
+        errors.append("`data_sources` must name at least one supported table")
+    if len(required_fields) == 0:
+        errors.append("`required_fields` must name at least one supported field")
+    if window_unit.lower() not in {"bar", "bars", "bar_count", "bar_counts"}:
+        errors.append("`window_unit` must explicitly indicate bars")
+
+    normalized_variables = dict(variables)
+    normalized_variables["__data_sources__"] = _stringify_intraday_metadata(data_sources)
+    normalized_variables["__required_fields__"] = _stringify_intraday_metadata(required_fields)
+    normalized_variables["__window_unit__"] = window_unit
+    if implementation_hints:
+        normalized_variables["__implementation_hints__"] = implementation_hints
+
+    normalized_payload = {
+        "factor_name": factor_name,
+        "description": description,
+        "formulation": formulation,
+        "variables": normalized_variables,
+        "expression_summary": expression_summary,
+        "resource": {
+            "data_sources": data_sources,
+            "required_fields": required_fields,
+            "window_unit": window_unit,
+            "implementation_hints": implementation_hints,
+        },
+    }
+    return normalized_payload, errors
 
 
 def render_hypothesis_and_feedback(prompt_dict, trace: Trace, history_limit: int = DEFAULT_HISTORY_LIMIT) -> str:
@@ -196,8 +286,6 @@ class QlibFactorHypothesis2Experiment(FactorHypothesis2Experiment):
 
 
 
-qa_prompt_dict = Prompts(file_path=Path(__file__).parent / "prompts" / "prompts.yaml")
-
 # prompt_dict not as attribute: class instance is pickled later, prompt_dict cannot be pickled
 class AlphaAgentHypothesisGen(FactorHypothesisGen):
     def __init__(self, scen: Scenario, potential_direction: str=None) -> Tuple[dict, bool]:
@@ -205,16 +293,17 @@ class AlphaAgentHypothesisGen(FactorHypothesisGen):
         self.potential_direction = potential_direction
 
     def prepare_context(self, trace: Trace, history_limit: int = DEFAULT_HISTORY_LIMIT) -> Tuple[dict, bool]:
+        prompt_dict = _load_alpha_agent_prompts(self.scen)
         
         if len(trace.hist) > 0:
             hypothesis_and_feedback = render_hypothesis_and_feedback(
-                qa_prompt_dict, trace, history_limit
+                prompt_dict, trace, history_limit
             )
             
         elif self.potential_direction is not None: 
             hypothesis_and_feedback = (
                 Environment(undefined=StrictUndefined)
-                .from_string(qa_prompt_dict["potential_direction_transformation"])
+                .from_string(prompt_dict["potential_direction_transformation"])
                 .render(potential_direction=self.potential_direction)
             ) # 
         else:
@@ -223,8 +312,8 @@ class AlphaAgentHypothesisGen(FactorHypothesisGen):
         context_dict = {
             "hypothesis_and_feedback": hypothesis_and_feedback,
             "RAG": None,
-            "hypothesis_output_format": qa_prompt_dict["hypothesis_output_format"],
-            "hypothesis_specification": qa_prompt_dict["factor_hypothesis_specification"],
+            "hypothesis_output_format": prompt_dict["hypothesis_output_format"],
+            "hypothesis_specification": prompt_dict["factor_hypothesis_specification"],
         }
         return context_dict, True
 
@@ -250,9 +339,10 @@ class AlphaAgentHypothesisGen(FactorHypothesisGen):
         while history_limit >= MIN_HISTORY_LIMIT:
             try:
                 context_dict, json_flag = self.prepare_context(trace, history_limit)
+                prompt_dict = _load_alpha_agent_prompts(self.scen)
                 system_prompt = (
                     Environment(undefined=StrictUndefined)
-                    .from_string(qa_prompt_dict["hypothesis_gen"]["system_prompt"])
+                    .from_string(prompt_dict["hypothesis_gen"]["system_prompt"])
                     .render(
                         targets=self.targets,
                         scenario=self.scen.get_scenario_all_desc(filtered_tag="hypothesis_and_experiment"),
@@ -262,7 +352,7 @@ class AlphaAgentHypothesisGen(FactorHypothesisGen):
                 )
                 user_prompt = (
                     Environment(undefined=StrictUndefined)
-                    .from_string(qa_prompt_dict["hypothesis_gen"]["user_prompt"])
+                    .from_string(prompt_dict["hypothesis_gen"]["user_prompt"])
                     .render(
                         targets=self.targets,
                         hypothesis_and_feedback=context_dict["hypothesis_and_feedback"],
@@ -284,9 +374,10 @@ class AlphaAgentHypothesisGen(FactorHypothesisGen):
         
         # Last attempt with minimum history limit
         context_dict, json_flag = self.prepare_context(trace, MIN_HISTORY_LIMIT)
+        prompt_dict = _load_alpha_agent_prompts(self.scen)
         system_prompt = (
             Environment(undefined=StrictUndefined)
-            .from_string(qa_prompt_dict["hypothesis_gen"]["system_prompt"])
+            .from_string(prompt_dict["hypothesis_gen"]["system_prompt"])
             .render(
                 targets=self.targets,
                 scenario=self.scen.get_scenario_all_desc(filtered_tag="hypothesis_and_experiment"),
@@ -296,7 +387,7 @@ class AlphaAgentHypothesisGen(FactorHypothesisGen):
         )
         user_prompt = (
             Environment(undefined=StrictUndefined)
-            .from_string(qa_prompt_dict["hypothesis_gen"]["user_prompt"])
+            .from_string(prompt_dict["hypothesis_gen"]["user_prompt"])
             .render(
                 targets=self.targets,
                 hypothesis_and_feedback=context_dict["hypothesis_and_feedback"],
@@ -366,11 +457,12 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
         return self._quality_gate
         
     def prepare_context(self, hypothesis: Hypothesis, trace: Trace, history_limit: int = DEFAULT_HISTORY_LIMIT) -> Tuple[dict | bool]:
+        prompt_dict = _load_alpha_agent_prompts(trace.scen)
         scenario = trace.scen.get_scenario_all_desc(filtered_tag="hypothesis_and_experiment")
-        experiment_output_format = qa_prompt_dict["factor_experiment_output_format"]
-        function_lib_description = qa_prompt_dict['function_lib_description']
+        experiment_output_format = prompt_dict["factor_experiment_output_format"]
+        function_lib_description = prompt_dict['function_lib_description']
         hypothesis_and_feedback = render_hypothesis_and_feedback(
-            qa_prompt_dict, trace, history_limit
+            prompt_dict, trace, history_limit
         )
 
         experiment_list: List[FactorExperiment] = [t[1] for t in trace.hist]
@@ -409,9 +501,11 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
     def _convert_with_history_limit(self, hypothesis: Hypothesis, trace: Trace, history_limit: int) -> Experiment:
         """Convert with given history limit."""
         context, json_flag = self.prepare_context(hypothesis, trace, history_limit)
+        prompt_dict = _load_alpha_agent_prompts(trace.scen)
+        intraday_codegen = _is_intraday_codegen_scenario(trace.scen)
         system_prompt = (
             Environment(undefined=StrictUndefined)
-            .from_string(qa_prompt_dict["hypothesis2experiment"]["system_prompt"])
+            .from_string(prompt_dict["hypothesis2experiment"]["system_prompt"])
             .render(
                 targets=self.targets,
                 scenario=context["scenario"],
@@ -420,7 +514,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
         )
         user_prompt = (
             Environment(undefined=StrictUndefined)
-            .from_string(qa_prompt_dict["hypothesis2experiment"]["user_prompt"])
+            .from_string(prompt_dict["hypothesis2experiment"]["user_prompt"])
             .render(
                 targets=self.targets,
                 target_hypothesis=context["target_hypothesis"],
@@ -435,6 +529,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
         # Detect duplicated sub-expressions
         flag = False
         expression_duplication_prompt = None
+        intraday_validation_prompt = None
         while True:
             if flag:
                 break
@@ -452,6 +547,65 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
                 factor_data = response_dict.get(factor_name, {})
                 if not isinstance(factor_data, dict):
                     continue
+                if intraday_codegen:
+                    normalized_payload, payload_errors = _normalize_intraday_factor_payload(factor_name, factor_data)
+                    if payload_errors:
+                        feedback_item = (
+                            f"- Factor `{factor_name}` has invalid intraday task schema: "
+                            + "; ".join(payload_errors)
+                        )
+                        intraday_validation_prompt = (
+                            "\n\n".join([intraday_validation_prompt, feedback_item])
+                            if intraday_validation_prompt
+                            else feedback_item
+                        )
+                        user_prompt = (
+                            Environment(undefined=StrictUndefined)
+                            .from_string(prompt_dict["hypothesis2experiment"]["user_prompt"])
+                            .render(
+                                targets=self.targets,
+                                target_hypothesis=context["target_hypothesis"],
+                                hypothesis_and_feedback=context["hypothesis_and_feedback"],
+                                function_lib_description=context["function_lib_description"],
+                                target_list=context["target_list"],
+                                RAG=context["RAG"],
+                                expression_duplication=intraday_validation_prompt,
+                            )
+                        )
+                        break
+
+                    description = normalized_payload["description"]
+                    formulation = normalized_payload["formulation"]
+                    variables = normalized_payload["variables"]
+                    expr = normalized_payload["expression_summary"]
+
+                    factor_data["variables"] = variables
+                    factor_data["expression_summary"] = expr
+                    factor_data["expression"] = expr
+                    factor_data["resource"] = normalized_payload["resource"]
+                    response_dict[factor_name] = factor_data
+
+                    if self.consistency_enabled and self.quality_gate is not None:
+                        try:
+                            passed, feedback, _ = self.quality_gate.evaluate(
+                                hypothesis=str(hypothesis),
+                                factor_name=factor_name,
+                                factor_description=description,
+                                factor_formulation=formulation,
+                                factor_expression=expr,
+                                variables=variables,
+                            )
+                            if not passed:
+                                logger.warning(f"Consistency check failed: {factor_name}, feedback: {feedback}")
+                        except Exception as e:
+                            logger.warning(f"Consistency check error: {e}")
+
+                    proposed_names.append(factor_name)
+                    proposed_exprs.append(expr)
+                    if i == len(response_dict) - 1:
+                        flag = True
+                    continue
+
                 expr = factor_data.get("expression", "")
                 description = factor_data.get("description", "")
                 formulation = factor_data.get("formulation", "")
@@ -513,7 +667,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
                     
                     feedback_item = (
                             Environment(undefined=StrictUndefined)
-                            .from_string(qa_prompt_dict["expression_duplication"])
+                            .from_string(prompt_dict["expression_duplication"])
                             .render(
                                 prev_expression=expr,
                                 duplicated_subtree_size=eval_dict['duplicated_subtree_size'],
@@ -539,7 +693,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
                     
                     user_prompt = (
                         Environment(undefined=StrictUndefined)
-                        .from_string(qa_prompt_dict["hypothesis2experiment"]["user_prompt"])
+                        .from_string(prompt_dict["hypothesis2experiment"]["user_prompt"])
                         .render(
                             targets=self.targets,
                             target_hypothesis=context["target_hypothesis"],
@@ -561,7 +715,8 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
         
 
         # Add valid factors to the factor regulator
-        self.factor_regulator.add_factor(proposed_names, proposed_exprs)
+        if not intraday_codegen:
+            self.factor_regulator.add_factor(proposed_names, proposed_exprs)
                 
                 
         return self.convert_response(resp, trace)
@@ -570,15 +725,30 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
     def convert_response(self, response: str, trace: Trace) -> FactorExperiment:
         response_dict = robust_json_parse(response)
         tasks = []
+        intraday_codegen = _is_intraday_codegen_scenario(trace.scen)
 
         for factor_name in response_dict:
             factor_data = response_dict.get(factor_name, {})
             if not isinstance(factor_data, dict):
                 continue
-            description = factor_data.get("description", "")
-            formulation = factor_data.get("formulation", "")
-            expression = factor_data.get("expression", "")
-            variables = factor_data.get("variables", {})
+            if intraday_codegen:
+                normalized_payload, payload_errors = _normalize_intraday_factor_payload(factor_name, factor_data)
+                if payload_errors:
+                    logger.warning(
+                        f"Skipping intraday factor `{factor_name}` because task schema is incomplete: {payload_errors}"
+                    )
+                    continue
+                description = normalized_payload["description"]
+                formulation = normalized_payload["formulation"]
+                expression = normalized_payload["expression_summary"]
+                variables = normalized_payload["variables"]
+                resource = normalized_payload["resource"]
+            else:
+                description = factor_data.get("description", "")
+                formulation = factor_data.get("formulation", "")
+                expression = factor_data.get("expression", "")
+                variables = factor_data.get("variables", {})
+                resource = None
             tasks.append(
                 FactorTask(
                     factor_name=factor_name,
@@ -586,6 +756,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
                     factor_formulation=formulation,
                     factor_expression=expression,
                     variables=variables,
+                    resource=resource,
                 )
             )
             

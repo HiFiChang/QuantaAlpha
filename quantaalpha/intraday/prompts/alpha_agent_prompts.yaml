@@ -1,0 +1,211 @@
+potential_direction_transformation: |-
+  It's the first round, and the user provided a potential intraday direction: "{{ potential_direction }}".
+  Rewrite it as a formal intraday alpha hypothesis that is testable inside the currently supported execution boundary.
+
+  Requirements:
+  1. State the market mechanism, not just a generic alpha slogan.
+  2. Keep the logic grounded in intraday bars, snapshots, and trade-flow concepts that can be computed from the supported schema.
+  3. Make the hypothesis actionable for factor generation within bar-based windows.
+
+hypothesis_and_feedback: |-
+  {% for hypothesis, experiment, feedback in trace.hist[-10:] %}
+  Hypothesis {{ loop.index }}: {{ hypothesis }}
+  Implemented intraday factor code excerpts:
+  {% for workspace in experiment.sub_workspace_list if workspace and workspace.code_dict and workspace.code_dict.get("factor.py") %}
+  {{ workspace.code_dict.get("factor.py")[:1200] }}
+  {% endfor %}
+  Observation on the result with the hypothesis: {{ feedback.observations }}
+  Feedback on the original hypothesis: {{ feedback.hypothesis_evaluation }}
+  New Feedback for Context (for you to agree with, refine, or reject): {{ feedback.new_hypothesis }}
+  Reasoning for new hypothesis: {{ feedback.reason }}
+  Did changing to this hypothesis work? {{ feedback.decision }}
+  {% endfor %}
+
+hypothesis_output_format: |-
+  The output should follow JSON format. Do not add any other text in your response. The schema is as follows:
+  {
+    "hypothesis": "A SINGLE LINE OF TEXT. A testable intraday market-mechanism hypothesis grounded in the supported schema.",
+    "concise_knowledge": "A SINGLE LINE OF TEXT. Transferable intraday microstructure knowledge stated conditionally.",
+    "concise_observation": "A SINGLE LINE OF TEXT. An observation about the supported intraday data, prior failures, or evaluation behavior.",
+    "concise_justification": "A SINGLE LINE OF TEXT. Why the hypothesis should work economically or behaviorally.",
+    "concise_specification": "A SINGLE LINE OF TEXT. Scope, bar horizon, leakage constraints, and the exact intraday relationships to test."
+  }
+
+factor_hypothesis_specification: |-
+  1. Build hypotheses strictly inside the supported intraday execution boundary.
+     - Prefer logical fields that can be mapped to `stock_base.m1`, `stock_base.tk`, and `stock_base.zb`.
+     - Treat all rolling windows as bar counts, not days.
+     - Do not assume undeclared order-book levels, large-order buckets, or external datasets.
+
+  2. Preserve the market mechanism.
+     - If the hypothesis is about queue recovery, aggressive flow, spread, depth imbalance, VWAP deviation, or range-volatility interaction, keep that mechanism explicit.
+     - Do not silently collapse a microstructure idea into a generic OHLCV momentum/reversal claim unless prior evidence clearly refutes the original mechanism.
+
+  3. Keep the hypothesis executable.
+     - Prefer mechanisms that can be computed mostly in SQL.
+     - Avoid constructs that require a full raw panel to be materialized in pandas before the main calculation.
+     - Favor concise, leakage-safe, same-session intraday logic.
+     - Do not define a factor by multiplying, conditioning on, or otherwise using future returns, future prices, or any forward-looking label inside the factor itself.
+
+function_lib_description: |-
+  The experiment output must stay within the supported intraday logical field set and bar-based operators.
+
+  Supported logical fields:
+  - Price / bar fields: `$open`, `$close`, `$high`, `$low`, `$volume`, `$money`, `$vwap`, `$return`
+  - Snapshot / top-of-book fields: `$bid1`, `$ask1`, `$bidv1`, `$askv1`, `$total_volume`, `$total_value`
+  - Trade / flow fields: `$trade_price`, `$trade_volume`, `$trade_flag`, `$ctype`
+  - Common derived concepts:
+    - `spread = $ask1 - $bid1`
+    - `relative_spread = ($ask1 - $bid1) / (( $ask1 + $bid1 ) / 2 + 1e-8)`
+    - `depth_imbalance_1 = ($bidv1 - $askv1) / ($bidv1 + $askv1 + 1e-8)`
+    - `trade_amount = $trade_price * $trade_volume`
+
+  Allowed operator families for symbolic expressions:
+  - Cross-sectional: `RANK`, `ZSCORE`, `MEAN`, `STD`, `SKEW`, `KURT`, `MAX`, `MIN`, `MEDIAN`
+  - Time-series / bar-window: `DELTA`, `DELAY`, `TS_MEAN`, `TS_SUM`, `TS_RANK`, `TS_ZSCORE`, `TS_MEDIAN`, `TS_PCTCHANGE`, `TS_MIN`, `TS_MAX`, `TS_STD`, `TS_VAR`, `TS_CORR`, `TS_COVARIANCE`, `TS_MAD`
+  - Math: `LOG`, `SQRT`, `POW`, `SIGN`, `EXP`, `ABS`, `INV`, `FLOOR`
+  - Conditionals: `COUNT`, `SUMIF`, `FILTER`, logical `&&`, `||`, ternary `(C1)?(A):(B)`
+
+  Hard rules:
+  - Treat every `n` in time-series operators as a number of bars.
+  - Expressions may use the logical intraday fields above even if the final implementation is written as SQL instead of the daily factor DSL.
+  - Do not introduce undeclared fields or hidden data sources.
+  - Do not use future-return, future-price, forward-offset, next-bar, or t+1/t+k terms as part of the factor definition. The factor must be computable from information available at or before bar `t`.
+
+factor_experiment_output_format: |-
+  The output should follow JSON format without other content. The schema is as follows:
+  {
+      "factor name 1": {
+          "description": "One concise paragraph. It must explicitly name the intraday mechanism, the main supported fields/tables, and the bar horizon.",
+          "variables": {
+              "field or operator name 1": "description of field or operator 1",
+              "field or operator name 2": "description of field or operator 2"
+          },
+          "formulation": "A LaTeX-style formulation that preserves the intraday mechanism. Windows must be described in bars, not days.",
+          "data_sources": ["supported source table 1", "supported source table 2"],
+          "required_fields": ["required field 1", "required field 2"],
+          "window_unit": "bars",
+          "implementation_hints": "One concise sentence on how the main computation should be pushed into SQL or otherwise implemented safely.",
+          "expression_summary": "An optional compact symbolic summary of the factor using supported logical intraday fields and operators. It is only a summary, not the canonical task definition."
+      },
+      "factor name 2": {
+          "description": "description of factor 2",
+          "variables": {
+              "field or operator name 1": "description of field or operator 1",
+              "field or operator name 2": "description of field or operator 2"
+          },
+          "formulation": "A LaTeX-style formulation of factor 2",
+          "data_sources": ["supported source table 1"],
+          "required_fields": ["required field 1"],
+          "window_unit": "bars",
+          "implementation_hints": "brief SQL-oriented implementation hint",
+          "expression_summary": "A symbolic summary of factor 2"
+      }
+  }
+
+  Intraday-specific requirements:
+  - Generate 1-2 factors only. Prefer quality over quantity.
+  - Preserve the core hypothesis mechanism exactly. If the hypothesis mentions queue recovery, aggressive flow, spread, depth imbalance, VWAP deviation, or same-session reversal, the factor description and formulation must still mention those concepts explicitly.
+  - Do not silently convert a microstructure factor into a pure OHLCV factor unless the hypothesis itself is already OHLCV-only.
+  - `data_sources` must only use supported tables such as `stock_base.m1`, `stock_base.tk`, and `stock_base.zb` or their logical names `m1`, `tk`, `zb`.
+  - `required_fields` must explicitly list the whitelisted fields needed for implementation.
+  - `window_unit` must always be `bars`.
+  - Use bar-based language such as "2-bar", "3-bar", or "5-bar" windows.
+  - `expression_summary` is a symbolic summary, not permission to ignore the description. The implementation will still be judged against the intraday mechanism named in the description.
+  - Never include future returns, future prices, next-bar outcomes, forward offsets, or `t+1...t+k` targets inside `description`, `formulation`, or `expression_summary`. Reversal factors should describe a signal observable at time `t`, not multiply by the future return being predicted.
+
+hypothesis_gen:
+  system_prompt: |-
+    The user is working on generating new hypotheses for the {{targets}} in a data-driven research and development process.
+    The {{targets}} are used in the following intraday scenario:
+    {{scenario}}
+    The user has already proposed several hypotheses and conducted evaluations on them. This information will be provided to you.
+    Your task is to check whether a hypothesis has already been generated. If one exists, follow it or generate an improved version.
+    {% if hypothesis_specification %}
+    To assist you in formulating new hypotheses, the user has provided some additional information:
+    {{hypothesis_specification}}.
+    **Important:** If the hypothesis_specification outlines the next steps you need to follow, ensure you adhere to those instructions.
+    {% endif %}
+    Generate an intraday hypothesis that remains inside the supported schema and preserves market-mechanism fidelity.
+    {{ hypothesis_output_format }}
+
+  user_prompt: |-
+    {% if hypothesis_and_feedback|length == 0 %}It is the first round of hypothesis generation. The user has no intraday hypothesis on this scenario yet. You are encouraged to propose an innovative but executable intraday hypothesis.
+    {% elif hypothesis_and_feedback|length > 0 and round == 0 %}{{ hypothesis_and_feedback }}
+    {% else %}It is not the first round, the user has made several hypotheses on this scenario and evaluated them.
+    The former hypotheses and corresponding feedback are as follows (focus on the last one and the new hypothesis it proposed):
+    {{ hypothesis_and_feedback }}
+    {% endif %}
+    {% if RAG %}
+    To assist you in generating new {{targets}}, we have provided the following information: {{RAG}}.
+    Use it only if it stays inside the supported intraday boundary.
+    {% endif %}
+    Also generate the relevant keys for the reasoning and distilled knowledge. Keep them intraday-specific rather than generic.
+
+hypothesis2experiment:
+  system_prompt: |-
+    The user is trying to generate new {{targets}} based on the hypothesis generated in the previous step.
+    The {{targets}} are used in the following intraday scenario:
+    {{ scenario }}
+
+    The user will use the generated {{targets}} to run experiments.
+    You will receive:
+    1. The target hypothesis.
+    2. Previous hypotheses and their feedback.
+    3. Former proposed {{targets}} on similar hypotheses.
+    4. Duplicated sub-expressions to avoid.
+    5. Additional scenario information.
+
+    Intraday requirements you MUST follow:
+    1. Generate 1-2 factors only.
+    2. Keep the factor description, formulation, and expression summary semantically aligned with the target hypothesis.
+    3. Preserve the primary intraday mechanism. If the hypothesis mentions queue recovery, aggressive flow, spread, depth imbalance, VWAP deviation, or same-session reversal, keep that mechanism explicit.
+    4. Treat all windows as bar counts, not days.
+    5. Prefer factors that can be implemented mostly in SQL on `m1`, `tk`, and `zb`.
+    6. Avoid undeclared tables, fields, or external data.
+    7. Simpler factors are preferred, but simplification must not erase the mechanism being tested.
+    8. `description`, `formulation`, `data_sources`, `required_fields`, and `window_unit` are the canonical task definition for intraday execution; `expression_summary` is only a compact summary.
+    9. The factor definition must be leakage-safe: do not include future returns, future prices, next-bar labels, `forward_offset`, or any `t+1...t+k` term in the factor itself.
+
+    {{ experiment_output_format }}
+
+  user_prompt: |-
+    The user has made several hypotheses on this scenario and did several evaluations on them.
+    The target hypothesis you are targeting to generate {{targets}} for is as follows:
+    {{ target_hypothesis }}
+
+    The former hypotheses and corresponding feedback are as follows:
+    {{ hypothesis_and_feedback }}
+
+    You are restricted to the intraday logical fields and operators below:
+    {{ function_lib_description }}
+
+    {% if expression_duplication %}
+    **Alert: Issues detected in previous intraday task summaries**
+    {{ expression_duplication }}
+    Fix the task schema while preserving the same economic mechanism.
+    {% endif %}
+
+    Generate the new {{targets}} in JSON format.
+    Do not rewrite a microstructure hypothesis into a generic daily-style price factor unless the hypothesis itself already did so.
+    Do not define the factor using future outcomes; if the hypothesis is about reversal, encode the contemporaneous signal that is expected to predict reversal rather than the future return itself.
+
+expression_duplication: |-
+  - Proposed Expression: {{ prev_expression }}
+  {% if duplicated_subtree_size > duplication_threshold %}
+  - Novelty Check Failed: duplicated subtree size ({{ duplicated_subtree_size }}) exceeds threshold ({{ duplication_threshold }})
+  - Duplicated sub-expression: {{ duplicated_subtree }}
+    {% if matched_alpha %}Matched with: {{ matched_alpha }}{% endif %}
+  {% endif %}
+  {% if free_args_ratio >= 0.5 %}
+  - Parsimony warning: free arguments ratio ({{ "%.2f"|format(free_args_ratio * 100) }}%) >= 50%.
+  {% endif %}
+  {% if unique_vars_ratio >= 0.5 %}
+  - Diversity warning: unique variables ratio ({{ "%.2f"|format(unique_vars_ratio * 100) }}%) >= 50%.
+  {% endif %}
+  {% if symbol_length > symbol_length_threshold %}
+  - Complexity warning: expression length ({{ symbol_length }}) exceeds threshold ({{ symbol_length_threshold }}). Simplify while preserving the same intraday mechanism.
+  {% endif %}
+  {% if num_base_features > base_features_threshold %}
+  - Feature-count warning: number of base features ({{ num_base_features }}) exceeds threshold ({{ base_features_threshold }}).
+  {% endif %}

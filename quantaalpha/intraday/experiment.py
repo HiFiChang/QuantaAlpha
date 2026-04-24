@@ -36,19 +36,45 @@ expressions.
             self._source_data_hypothesis = """
 The implementation stage can fetch remote intraday bars at execution time, so
 factor expression design should focus on the logical fields that are reliably
-available after remote loading:
-- $open
-- $close
-- $high
-- $low
-- $volume
-- $money
-- $vwap
-- $return
+available after remote loading.
+
+Confirmed base sources under `stock_base`:
+- `m1`: minute bar OHLCV/amount
+- `tk`: snapshot top-of-book depth and aggregated trading stats
+- `zb`: trade-level amount flow with aggressor-side markers
+
+Allowed logical fields and derived concepts for hypothesis / expression design:
+- Bar price-volume:
+- $open: bar open price
+- $close: bar close price
+- $high: bar high price
+- $low: bar low price
+- $volume: bar traded share volume
+- $money: bar traded amount / turnover
+- $vwap: bar volume-weighted average price, typically `$money / $volume`
+- $return: bar close-to-close return
+- Snapshot / liquidity:
+  - bid1, ask1: best bid / ask prices
+  - bidv1, askv1: best bid / ask queue sizes
+  - total_volume: cumulative traded volume up to the snapshot
+  - total_value: cumulative traded amount up to the snapshot
+- Transaction / flow:
+  - trade_price: per-trade execution price from `zb.price`
+  - trade_volume: per-trade size from `zb.volume`
+  - trade_flag: marker from `zb.trade_flag`
+  - ctype: merged event category from `zb.ctype`
+- Standard derived metrics that may be implemented from the whitelist above:
+  - spread: `ask1 - bid1`
+  - relative_spread: normalized top-of-book spread
+  - depth_imbalance_1: top-level bid-vs-ask queue imbalance
+  - active_buy_amount / active_sell_amount: `trade_price * trade_volume` grouped by `trade_flag`
+  - raw_flow_diff: `active_buy_amount - active_sell_amount`
+  - trade_imbalance_amount: normalized buy-vs-sell amount imbalance
 
 Remote execution resources exist, but expression design should stay at the
-factor-definition level. Do not assume order-book, Level-2, bid/ask ladder, or
-tick-only fields unless they are explicitly introduced elsewhere.
+factor-definition level. Do not assume any fields outside the whitelist above.
+In particular, do not invent undeclared large-order / small-order / multi-level
+order-book fields unless they can be computed from the allowed raw columns.
 """.strip()
             self._source_data = f"""
 The execution environment does not rely on a prebuilt local panel. Instead,
@@ -59,19 +85,22 @@ Reliable remote resources:
 - ruogu Python package is available
 - `rg.command_get_df(sql)` can execute SQL remotely
 - `trade_cal` is available for trade-date expansion
-- A reliable minute-bar source is `stock_base.m1`, whose common fields include:
-  - `date_time`
-  - `date`
-  - `time_int`
-  - `code`
-  - `open`
-  - `close`
-  - `high`
-  - `low`
-  - `volume`
-  - `amount`
 
-When you need the same logical fields as local mode, map them as:
+Use a deliberately small schema. Prefer these three sources only:
+
+1. `stock_base.m1`
+- `code`: stock code
+- `date_time`: bar timestamp
+- `date`: trade date
+- `time_int`: exchange time encoded as integer
+- `open`: bar open price
+- `close`: bar close price
+- `high`: bar high price
+- `low`: bar low price
+- `volume`: traded share volume in the bar
+- `amount`: traded turnover / traded amount in the bar
+
+Logical mapping from bar data:
 - $open  -> open
 - $close -> close
 - $high  -> high
@@ -79,6 +108,52 @@ When you need the same logical fields as local mode, map them as:
 - $volume -> volume
 - $money -> amount
 - $vwap  -> amount / volume
+- $return -> compute in SQL with window functions when needed
+
+2. `stock_base.tk` (snapshot / top-of-book only)
+- `code`: stock code
+- `date_time`: snapshot timestamp
+- `date`: trade date
+- `time_int`: exchange time encoded as integer
+- `total_volume`: cumulative traded volume up to snapshot
+- `total_value`: cumulative traded amount up to snapshot
+- `bid1`: best bid price
+- `ask1`: best ask price
+- `bidv1`: best bid queue size
+- `askv1`: best ask queue size
+
+3. `stock_base.zb` (trade flow only)
+- `code`: stock code
+- `date`: trade date
+- `date_time`: event timestamp
+- `time_int`: exchange time encoded as integer
+- `price`: transaction price
+- `volume`: order quantity / transaction quantity
+- `trade_flag`: trade status / inner-outer side marker. Official values:
+  - `B`: Shanghai outer trade / active buy
+  - `S`: Shanghai inner trade / active sell
+  - `N`: Shanghai unknown
+  - `F`: Shenzhen trade
+  - `4`: Shenzhen cancel
+- `ctype`: merged event category. Official values:
+  - `1`: add limit order
+  - `2`: add market order
+  - `3`: add own-side-best order
+  - `4`: cancel
+  - `5`: trade
+
+Allowed standard derived metrics from the whitelist above:
+- `spread = ask1 - bid1`: raw top-of-book spread
+- `relative_spread = (ask1 - bid1) / ((ask1 + bid1) / 2 + 1e-8)`: normalized spread
+- `depth_imbalance_1 = (bidv1 - askv1) / (bidv1 + askv1 + 1e-8)`: best-level queue imbalance
+- `active_buy_amount / active_sell_amount`: transaction amount grouped by `trade_flag`
+- `raw_flow_diff = active_buy_amount - active_sell_amount`: raw aggressor-flow difference
+- `trade_imbalance_amount = (active_buy_amount - active_sell_amount) / (active_buy_amount + active_sell_amount + 1e-8)`: normalized aggressor-flow imbalance
+
+Hard schema rule:
+- Use only the tables and columns explicitly listed above.
+- Do not use undeclared fields such as multi-level depth, order ids, large/small
+  order buckets, or shorthand aliases that are not listed above.
 
 If you need `$return`, compute it in SQL when possible by using window
 functions over `(code order by date_time)`. Python should only do orchestration
@@ -250,6 +325,41 @@ stories that require unavailable inputs.
 
     def get_hypothesis_source_data_desc(self, task: Task | None = None) -> str:  # noqa: ARG002
         return self._source_data_hypothesis
+
+    def get_planning_context_desc(self, task: Task | None = None) -> str:  # noqa: ARG002
+        if self.execution_mode == INTRADAY_EXECUTION_MODE_RUOGU_SQL:
+            return """
+Current intraday planning must stay within the confirmed `stock_base` sources:
+- `m1`: minute OHLCV / amount bars
+- `tk`: best bid / ask prices and best bid / ask queue sizes
+- `zb`: trade price, trade volume, `trade_flag`, and `ctype`
+
+Directions may use:
+- intraday price-volume dynamics
+- order-flow imbalance and signed trade flow
+- top-of-book depth imbalance, spread, relative spread
+- short-window reversal and liquidity replenishment
+
+Do not propose directions that require external macro or cross-asset datasets
+such as index futures, FX, commodities, news, sentiment feeds, or any tables
+outside the whitelist above.
+""".strip()
+
+        return """
+Current intraday planning must stay within the local panel fields only:
+- $open
+- $close
+- $high
+- $low
+- $volume
+- $vwap
+- $money
+- $return
+
+Do not propose directions that rely on order-book, Level-2, tick, transaction,
+macro, cross-asset, news, or sentiment data that are not present in this local
+panel.
+""".strip()
 
     @property
     def interface(self) -> str:

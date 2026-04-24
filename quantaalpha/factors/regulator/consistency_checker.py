@@ -13,6 +13,13 @@ from quantaalpha.llm.client import APIBackend, robust_json_parse
 from quantaalpha.log import logger
 
 consistency_prompts = Prompts(file_path=Path(__file__).parent / "consistency_prompts.yaml")
+INTRADAY_CONSISTENCY_PROMPTS = Path(__file__).parents[2] / "intraday" / "prompts" / "consistency_prompts.yaml"
+
+
+def _load_consistency_prompts(scen=None) -> Prompts:
+    if scen is not None and scen.__class__.__module__.startswith("quantaalpha.intraday"):
+        return Prompts(file_path=INTRADAY_CONSISTENCY_PROMPTS)
+    return consistency_prompts
 
 
 @dataclass
@@ -79,15 +86,16 @@ class FactorConsistencyChecker:
         logger.info(f"Starting consistency check: {factor_name}")
         
         try:
+            prompt_dict = _load_consistency_prompts(self.scen)
             system_prompt = (
                 Environment(undefined=StrictUndefined)
-                .from_string(consistency_prompts["consistency_check_system"])
+                .from_string(prompt_dict["consistency_check_system"])
                 .render()
             )
             
             user_prompt = (
                 Environment(undefined=StrictUndefined)
-                .from_string(consistency_prompts["consistency_check_user"])
+                .from_string(prompt_dict["consistency_check_user"])
                 .render(
                     hypothesis=hypothesis,
                     factor_name=factor_name,

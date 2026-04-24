@@ -73,6 +73,7 @@ def generate_parallel_directions(
     max_attempts: int = 5,
     use_llm: bool = True,
     allow_fallback: bool = True,
+    planning_context: str | None = None,
 ) -> list[str]:
     n = max(1, int(n))
     prompts = _load_prompts(prompt_file)
@@ -82,6 +83,14 @@ def generate_parallel_directions(
 
     system_prompt = sys_tpl.format(initial_direction=initial_direction, n=n)
     user_prompt = user_tpl.format(initial_direction=initial_direction, n=n)
+    if planning_context:
+        user_prompt = (
+            f"{user_prompt}\n\n"
+            "Available data / execution boundary:\n"
+            f"{planning_context}\n\n"
+            "Stay within this boundary. Do not propose directions that depend on "
+            "external datasets, tables, or fields not explicitly listed above."
+        )
     if output_format:
         if "{n}" in output_format:
             output_format = output_format.replace("{n}", str(n))
@@ -114,4 +123,3 @@ def load_run_config(config_path: Path) -> dict[str, Any]:
     except Exception as exc:
         logger.warning(f"Failed to load run config: {exc}")
         return {}
-

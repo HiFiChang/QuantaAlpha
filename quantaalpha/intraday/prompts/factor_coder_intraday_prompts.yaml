@@ -1,0 +1,184 @@
+evaluator_code_feedback_v1_system: |-
+  User is trying to implement intraday factors in the following scenario:
+  {{ scenario }}
+
+  The code may be a full Python + SQL implementation rather than a simple daily factor expression.
+  Your job is to check whether the implementation preserves the factor description's intraday mechanism and whether it can be correctly calculated.
+
+  Intraday review priorities:
+  1. Does the implementation preserve the mechanism named in the factor description?
+  2. Does it use the declared intraday data sources / fields rather than silently collapsing to a different OHLCV-only factor?
+  3. Are windows interpreted as bar counts and is leakage avoided?
+  4. Is the main calculation pushed into SQL when the scenario expects SQL-side computation?
+
+  Be strict about semantic drift:
+  - If the factor description is about queue recovery, aggressive flow, spread, depth imbalance, VWAP deviation, or same-session reversal, and the code instead computes a generic price-only factor, that is a major issue.
+  - Minor window or normalization differences are acceptable only if the same intraday mechanism is preserved.
+
+  Do not give the user line-by-line debugging instructions.
+  If there is no major issue, respond with exactly: `No comment found`
+  Otherwise respond as:
+  comment 1: ...
+  comment 2: ...
+
+evaluator_code_feedback_v1_user: |-
+  --------------Factor information:---------------
+  {{ factor_information }}
+  --------------Factor implementation code:---------------
+  {{ code }}
+  --------------Execution feedback:---------------
+  {{ execution_feedback }}
+  {% if value_feedback is not none %}
+  --------------Factor value feedback:---------------
+  {{ value_feedback }}
+  {% endif %}
+
+evolving_strategy_factor_implementation_v1_system: |-
+  User is trying to implement intraday factors in the following scenario:
+  {{ scenario }}
+
+  The implementation is expected to preserve the factor description's intraday mechanism and produce executable code.
+  For intraday tasks, correctness means more than merely running:
+  - keep the declared market mechanism,
+  - stay within the supported schema,
+  - use SQL-side computation by default when possible,
+  - avoid leaking future information,
+  - keep all windows in bar units.
+
+  When correcting previous attempts, preserve the mechanism first and simplify only if needed.
+  If a previous attempt drifted into a generic OHLCV factor, move it back toward the original intraday mechanism instead of polishing the wrong idea.
+
+  Please respond in JSON:
+  {
+      "code": "[FULL_EXECUTABLE_FACTOR_PY]"
+  }
+
+  Hard output rules:
+  - Return the full executable contents of `factor.py`, not a symbolic expression and not a plan.
+  - Do not wrap the code in markdown fences.
+  - The code must write `result.h5` locally.
+  - In `ruogu_sql` mode, keep the main computation in SQL whenever possible.
+
+evolving_strategy_factor_implementation_v2_user: |-
+  --------------Target factor information:---------------
+  {{ factor_information_str }}
+
+  Return a full `factor.py` implementation in JSON under the `code` key.
+  Do not return `expr`, pseudo-code, or a natural-language plan.
+
+  {% if former_expression is defined and former_expression is not none %}
+  --------------Your former latest attempt:---------------
+  =====Previous implementation / extracted expression=====
+  {{ former_expression }}
+
+  =====Feedback to the former implementation=====
+  {{ former_feedback }}
+  {% endif %}
+
+  {% if queried_similar_error_knowledge|length != 0 %}
+  {% if error_summary_critics is none %}
+  Recall your last failure. Here are some examples of similar intraday errors and their solutions:
+  {% for error_content, similar_error_knowledge in queried_similar_error_knowledge %}
+  --------------Factor information to similar error ({{error_content}}):---------------
+  {{ similar_error_knowledge[0].target_task.get_task_information() }}
+  =====Code with similar error ({{error_content}}):=====
+  {{ similar_error_knowledge[0].implementation.code }}
+  =====Success code to former code with similar error ({{error_content}}):=====
+  {{ similar_error_knowledge[1].implementation.code }}
+  {% endfor %}
+  {% else %}
+  Recall your last failure. After reviewing similar errors and fixes, here are some suggestions:
+  {{ error_summary_critics }}
+  {% endif %}
+  {% endif %}
+
+  {% if similar_successful_factor_description is defined and similar_successful_factor_description is not none %}
+  Here are successful implementations of similar tasks:
+  =====Factor Description:=====
+  {{ similar_successful_factor_description }}
+  =====Implementation / Expression:=====
+  {{ similar_successful_expression }}
+  {% endif %}
+
+  {% if latest_attempt_to_latest_successful_execution is defined and latest_attempt_to_latest_successful_execution is not none %}
+  Here is your latest failed attempt before the latest successful execution. Avoid repeating its errors:
+  =====Your latest attempt=====
+  {{ latest_attempt_to_latest_successful_execution.implementation.code }}
+  =====Feedback=====
+  {{ latest_attempt_to_latest_successful_execution.feedback }}
+  {% endif %}
+
+evolving_strategy_error_summary_v2_system: |-
+  User is trying to implement intraday factors in the following scenario:
+  {{ scenario }}
+  User is doing the following task:
+  {{ factor_information_str }}
+
+  You have written some code but it meets errors like the following:
+  {{ code_and_feedback }}
+
+  The user has found tasks that met similar errors, and their final correct solutions.
+  Provide short, high-signal critics that help solve the current intraday implementation issue.
+  Focus on:
+  - wrong tables / fields,
+  - SQL syntax / aliasing issues,
+  - leakage / misalignment,
+  - semantic drift away from the factor description.
+
+  Respond as:
+  critic 1: ...
+  critic 2: ...
+
+evolving_strategy_error_summary_v2_user: |-
+  {% if queried_similar_error_knowledge|length != 0 %}
+  {% for error_content, similar_error_knowledge in queried_similar_error_knowledge %}
+  --------------Factor information to similar error ({{error_content}}):---------------
+  {{ similar_error_knowledge[0].target_task.get_task_information() }}
+  =====Code with similar error ({{error_content}}):=====
+  {{ similar_error_knowledge[0].implementation.code }}
+  =====Success code to former code with similar error ({{error_content}}):=====
+  {{ similar_error_knowledge[1].implementation.code }}
+  {% endfor %}
+  {% endif %}
+
+evaluator_final_decision_v1_system: |-
+  User is trying to implement intraday factors in the following scenario:
+  {{ scenario }}
+  User has finished evaluation and got some feedback from the evaluator.
+  Analyze the execution feedback, code feedback, and value feedback, then decide whether the factor was implemented correctly.
+
+  Intraday final-decision rules:
+  1. Successful execution is necessary but not sufficient.
+  2. The implementation must align with the scenario and factor description.
+  3. If the factor description names a specific intraday mechanism, reject implementations that drift into a different generic factor even if they run successfully.
+  4. If the implementation uses unsupported fields, wrong tables, obvious leakage, or bar/day window confusion, reject it.
+
+  Respond in JSON only:
+  {
+      "final_decision": true,
+      "final_feedback": "A SINGLE LINE OF TEXT"
+  }
+
+evaluator_final_decision_v1_user: |-
+  --------------Factor information:---------------
+  {{ factor_information }}
+  --------------Execution feedback:---------------
+  {{ execution_feedback }}
+  --------------Code feedback:---------------
+  {{ code_feedback }}
+  --------------Factor value feedback:---------------
+  {{ value_feedback }}
+
+function_lib_description: |-
+  Supported intraday logical fields:
+  - `$open`, `$close`, `$high`, `$low`, `$volume`, `$money`, `$vwap`, `$return`
+  - `$bid1`, `$ask1`, `$bidv1`, `$askv1`, `$total_volume`, `$total_value`
+  - `$trade_price`, `$trade_volume`, `$trade_flag`, `$ctype`
+
+  Supported operator families for symbolic summaries:
+  - Cross-sectional: `RANK`, `ZSCORE`, `MEAN`, `STD`, `SKEW`, `KURT`, `MAX`, `MIN`, `MEDIAN`
+  - Time-series / bar-window: `DELTA`, `DELAY`, `TS_MEAN`, `TS_SUM`, `TS_RANK`, `TS_ZSCORE`, `TS_MEDIAN`, `TS_PCTCHANGE`, `TS_MIN`, `TS_MAX`, `TS_STD`, `TS_VAR`, `TS_CORR`, `TS_COVARIANCE`, `TS_MAD`
+  - Math: `LOG`, `SQRT`, `POW`, `SIGN`, `EXP`, `ABS`, `INV`, `FLOOR`
+  - Conditionals: `COUNT`, `SUMIF`, `FILTER`, logical `&&`, `||`, ternary `(C1)?(A):(B)`
+
+  Treat all windows as bar counts, not days.

@@ -32,6 +32,13 @@ def _resolve_template_path(scen=None) -> Path:
 
 
 implement_prompts = Prompts(file_path=Path(__file__).parent / "prompts.yaml")
+INTRADAY_CODER_PROMPTS = Path(__file__).parents[2] / "intraday" / "prompts" / "factor_coder_intraday_prompts.yaml"
+
+
+def _load_coder_prompts(scen=None) -> Prompts:
+    if scen is not None and scen.__class__.__module__.startswith("quantaalpha.intraday"):
+        return Prompts(file_path=INTRADAY_CODER_PROMPTS)
+    return implement_prompts
 
 
 def _extract_code_from_llm_response(response: str) -> str:
@@ -39,12 +46,30 @@ def _extract_code_from_llm_response(response: str) -> str:
     if not response:
         return ""
 
+    def _looks_like_python_code(text: str) -> bool:
+        text = (text or "").strip()
+        if not text:
+            return False
+        python_markers = (
+            "import ",
+            "from ",
+            "def ",
+            "class ",
+            "if __name__ ==",
+            "to_hdf(",
+            "result.h5",
+        )
+        return any(marker in text for marker in python_markers)
+
     try:
         parsed = json.loads(response)
         if isinstance(parsed, dict):
             code = parsed.get("code")
             if isinstance(code, str) and code.strip():
                 return code.strip()
+            expr = parsed.get("expr")
+            if isinstance(expr, str) and _looks_like_python_code(expr):
+                return expr.strip()
     except json.JSONDecodeError:
         pass
 
@@ -60,7 +85,7 @@ def _extract_code_from_llm_response(response: str) -> str:
             if code:
                 return code
 
-    if response.startswith("import ") or response.startswith("from ") or "def " in response:
+    if _looks_like_python_code(response):
         return response
 
     return ""
@@ -90,9 +115,10 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
         queried_former_failed_knowledge_to_render: list,
         queried_similar_error_knowledge_to_render: list,
     ) -> str:
+        prompt_dict = _load_coder_prompts(self.scen)
         error_summary_system_prompt = (
             Environment(undefined=StrictUndefined)
-            .from_string(implement_prompts["evolving_strategy_error_summary_v2_system"])
+            .from_string(prompt_dict["evolving_strategy_error_summary_v2_system"])
             .render(
                 scenario=self.scen.get_scenario_all_desc(target_task),
                 factor_information_str=target_task.get_task_information(),
@@ -103,7 +129,7 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
         for _ in range(10):  # max attempt to reduce the length of error_summary_user_prompt
             error_summary_user_prompt = (
                 Environment(undefined=StrictUndefined)
-                .from_string(implement_prompts["evolving_strategy_error_summary_v2_user"])
+                .from_string(prompt_dict["evolving_strategy_error_summary_v2_user"])
                 .render(
                     queried_similar_error_knowledge=queried_similar_error_knowledge_to_render,
                 )
@@ -130,6 +156,7 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
         target_task: FactorTask,
         queried_knowledge: CoSTEERQueriedKnowledge,
     ) -> str:
+        prompt_dict = _load_coder_prompts(self.scen)
         target_factor_task_information = target_task.get_task_information()
 
         queried_similar_successful_knowledge = (
@@ -162,7 +189,7 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
         system_prompt = (
             Environment(undefined=StrictUndefined)
             .from_string(
-                implement_prompts["evolving_strategy_factor_implementation_v1_system"],
+                prompt_dict["evolving_strategy_factor_implementation_v1_system"],
             )
             .render(
                 scenario=self.scen.get_scenario_all_desc(target_task, filtered_tag="feature"),
@@ -195,7 +222,7 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
             user_prompt = (
                 Environment(undefined=StrictUndefined)
                 .from_string(
-                    implement_prompts["evolving_strategy_factor_implementation_v2_user"],
+                    prompt_dict["evolving_strategy_factor_implementation_v2_user"],
                 )
                 .render(
                     factor_information_str=target_task.get_task_description(),
@@ -244,7 +271,6 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
 
 
 
-qa_implement_prompts = Prompts(file_path=Path(__file__).parent / "qa_prompts.yaml")
 class FactorParsingStrategy(MultiProcessEvolvingStrategy):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -262,6 +288,7 @@ class FactorParsingStrategy(MultiProcessEvolvingStrategy):
         queried_knowledge: CoSTEERQueriedKnowledge,
     ) -> str:
         """Generate code for one factor task. First run: template; on error: give LLM feedback and cases."""
+        prompt_dict = _load_coder_prompts(self.scen)
         target_factor_task_information = target_task.get_task_information()
 
         queried_similar_successful_knowledge = (
@@ -302,7 +329,7 @@ class FactorParsingStrategy(MultiProcessEvolvingStrategy):
             system_prompt = (
                 Environment(undefined=StrictUndefined)
                 .from_string(
-                    qa_implement_prompts["evolving_strategy_factor_implementation_v1_system"],
+                    prompt_dict["evolving_strategy_factor_implementation_v1_system"],
                 )
                 .render(
                     scenario=self.scen.get_scenario_all_desc(target_task, filtered_tag="feature"),
@@ -337,7 +364,7 @@ class FactorParsingStrategy(MultiProcessEvolvingStrategy):
                 user_prompt = (
                     Environment(undefined=StrictUndefined)
                     .from_string(
-                        qa_implement_prompts["evolving_strategy_factor_implementation_v2_user"],
+                        prompt_dict["evolving_strategy_factor_implementation_v2_user"],
                     )
                     .render(
                         factor_information_str=target_task.get_task_description(),
