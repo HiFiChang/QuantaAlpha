@@ -269,7 +269,7 @@ def _process_intraday_results(
 
 
 def _build_complexity_feedback(task_detail: dict[str, Any]) -> str | None:
-    factor_expr = task_detail.get("factor_expression", "")
+    factor_expr = task_detail.get("executed_expression") or task_detail.get("factor_expression", "")
     if not factor_expr:
         return None
 
@@ -311,6 +311,14 @@ def _enrich_task_details(exp: Experiment, summaries: list[dict[str, Any]]) -> li
         summary = summary_by_source_name.get(task_name, summaries[idx] if idx < len(summaries) else {})
         task_detail["runtime_factor_name"] = summary.get("factor_name", "")
         task_detail["source_factor_name"] = summary.get("source_factor_name", task_detail.get("factor_name", ""))
+        original_expression = task_detail.get("factor_expression", "")
+        executed_expression = summary.get("executed_expression") or original_expression
+        task_detail["original_factor_expression"] = summary.get("original_factor_expression") or original_expression
+        task_detail["executed_expression"] = executed_expression
+        task_detail["factor_expression"] = executed_expression
+        task_detail["expression_changed_by_coder"] = bool(
+            original_expression and executed_expression and original_expression.strip() != executed_expression.strip()
+        )
         task_detail["intraday_metrics"] = summary.get("metrics", {})
         task_detail["intraday_metrics_table"] = _summary_metrics_table(summary) if summary else "N/A"
         task_detail["intraday_structure_table"] = _summary_structure_table(summary) if summary else "N/A"

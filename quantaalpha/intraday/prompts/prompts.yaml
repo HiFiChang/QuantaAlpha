@@ -54,7 +54,11 @@ factor_feedback_generation:
     - {{ task.factor_name }}: {{ task.factor_description }}
       - Factor formulation: {{ task.factor_formulation }}
       - Variables: {{ task.variables }}
-      - Expression: {{ task.factor_expression }}
+      - Executed expression: {{ task.executed_expression or task.factor_expression }}
+      {% if task.expression_changed_by_coder %}
+      - Original proposed expression: {{ task.original_factor_expression }}
+      - Note: the coder/evaluator changed the executable expression before evaluation; interpret metrics using the executed expression.
+      {% endif %}
       - Factor implementation: {{ task.factor_implementation }}
       - Runtime factor name: {{ task.runtime_factor_name }}
       - Intraday metrics:

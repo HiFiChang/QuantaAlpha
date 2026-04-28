@@ -20,10 +20,16 @@ from quantaalpha.llm.config import LLM_SETTINGS
 from quantaalpha.llm.client import APIBackend
 from quantaalpha.core.utils import multiprocessing_wrapper
 from quantaalpha.core.conf import RD_AGENT_SETTINGS
+from quantaalpha.intraday.mode import INTRADAY_EXECUTION_MODE_RUOGU_SQL, get_intraday_execution_mode
 
 
 def _resolve_template_path(scen=None) -> Path:
     if scen is not None and scen.__class__.__module__.startswith("quantaalpha.intraday"):
+        if get_intraday_execution_mode() == INTRADAY_EXECUTION_MODE_RUOGU_SQL:
+            ruogu_expr_path = Path(__file__).parents[2] / "intraday" / "coder" / "template_ruogu_expr_sql.jinjia2"
+            if not ruogu_expr_path.exists():
+                raise FileNotFoundError(f"Ruogu expression SQL template not found: {ruogu_expr_path}")
+            return ruogu_expr_path
         intraday_path = Path(__file__).parents[2] / "intraday" / "coder" / "template_intraday.jinjia2"
         if not intraday_path.exists():
             raise FileNotFoundError(f"Intraday template not found: {intraday_path}")
@@ -116,13 +122,20 @@ class FactorMultiProcessEvolvingStrategy(MultiProcessEvolvingStrategy):
         queried_similar_error_knowledge_to_render: list,
     ) -> str:
         prompt_dict = _load_coder_prompts(self.scen)
+        latest_failed = queried_former_failed_knowledge_to_render[-1]
+        latest_failed_summary = (
+            "expression: "
+            f"{self.extract_expr(getattr(latest_failed.implementation, 'code', ''))}\n"
+            "feedback: "
+            f"{getattr(latest_failed, 'feedback', '')}"
+        )
         error_summary_system_prompt = (
             Environment(undefined=StrictUndefined)
             .from_string(prompt_dict["evolving_strategy_error_summary_v2_system"])
             .render(
                 scenario=self.scen.get_scenario_all_desc(target_task),
                 factor_information_str=target_task.get_task_information(),
-                code_and_feedback=queried_former_failed_knowledge_to_render[-1].get_implementation_and_feedback_str(),
+                code_and_feedback=latest_failed_summary,
             )
             .strip("\n")
         )

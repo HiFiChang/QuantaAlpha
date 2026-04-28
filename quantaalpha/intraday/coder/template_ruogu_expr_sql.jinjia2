@@ -1,0 +1,42 @@
+import os
+
+import pandas as pd
+import ruogu as rg
+from ruogu import trade_cal
+
+from quantaalpha.intraday.sql_expr_compiler import build_m1_factor_sql
+
+
+def calculate_factor(expr: str) -> pd.Series:
+    token = os.environ.get("RUOGU_TOKEN")
+    if token:
+        rg.set_token(token)
+
+    analysis_start = os.environ["INTRADAY_ANALYSIS_START"]
+    analysis_end = os.environ["INTRADAY_ANALYSIS_END"]
+    calc_start = str(trade_cal.pre_date(analysis_start)).split()[0]
+
+    sql = build_m1_factor_sql(
+        expression=expr,
+        calc_start=calc_start,
+        analysis_start=analysis_start,
+        analysis_end=analysis_end,
+    )
+    df = rg.command_get_df(sql)
+    if df.empty:
+        raise ValueError("No remote intraday rows were fetched.")
+
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    df["instrument"] = df["instrument"].astype(str).str.zfill(6)
+    df["factor_value"] = pd.to_numeric(df["factor_value"], errors="coerce")
+    return (
+        df.set_index(["datetime", "instrument"])
+        .sort_index()["factor_value"]
+        .astype(float)
+    )
+
+
+if __name__ == "__main__":
+    expr = "{{ expression }}"
+    result = calculate_factor(expr)
+    result.to_hdf("result.h5", key="data")

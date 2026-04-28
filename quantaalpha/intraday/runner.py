@@ -75,6 +75,23 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
 
         return result.astype(float)
 
+    def _extract_workspace_expression(self, workspace) -> str:
+        """Return the DSL expression that was actually rendered into factor.py."""
+        code = ""
+        code_dict = getattr(workspace, "code_dict", None) or {}
+        if "factor.py" in code_dict:
+            code = code_dict["factor.py"]
+        else:
+            code_path = Path(workspace.workspace_path) / "factor.py"
+            if code_path.exists():
+                code = code_path.read_text(encoding="utf-8")
+
+        if not code:
+            return ""
+
+        match = re.search(r"expr\s*=\s*([\"'])(.*?)\1", code, flags=re.DOTALL)
+        return match.group(2).strip() if match else ""
+
     def _series_to_upload_df(self, series: pd.Series, factor_name: str) -> pd.DataFrame:
         df = series.rename("factor_value").reset_index()
         rename_map = {}
@@ -228,12 +245,16 @@ class IntradayFactorRunner(Developer[QlibFactorExperiment]):
                 continue
 
             factor_name = getattr(workspace.target_task, "factor_name", f"{self.default_factor_prefix}_{idx}")
+            original_expression = getattr(workspace.target_task, "factor_expression", "") or ""
+            executed_expression = self._extract_workspace_expression(workspace) or original_expression
             upload_df = self._series_to_upload_df(series, factor_name)
             summary = self._evaluate_uploaded_factor(
                 factor_name=factor_name,
                 upload_df=upload_df,
                 workspace_path=Path(workspace.workspace_path),
             )
+            summary["original_factor_expression"] = original_expression
+            summary["executed_expression"] = executed_expression
             summaries.append(summary)
 
         if not summaries:

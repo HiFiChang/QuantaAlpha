@@ -16,10 +16,28 @@ import pandas as pd
 from quantaalpha.log import logger
 from quantaalpha.factors.regulator.factor_regulator import FactorRegulator
 from quantaalpha.intraday.mode import INTRADAY_EXECUTION_MODE_RUOGU_SQL
+from quantaalpha.intraday.sql_expr_compiler import FIELD_SQL
 
 DEFAULT_HISTORY_LIMIT = 6
 MIN_HISTORY_LIMIT = 1
 INTRADAY_PROMPTS_DIR = Path(__file__).parents[1] / "intraday" / "prompts"
+INTRADAY_SUPPORTED_SOURCES = {
+    "bar",
+    "bars",
+    "price_volume",
+    "order_book",
+    "snapshot",
+    "liquidity",
+    "trade_flow",
+    "flow",
+    "m1",
+    "stock_base.m1",
+    "tk",
+    "stock_base.tk",
+    "zb",
+    "stock_base.zb",
+}
+INTRADAY_SUPPORTED_FIELDS = set(FIELD_SQL)
 
 
 def _is_intraday_scenario(scen: Scenario | None) -> bool:
@@ -69,6 +87,11 @@ def _normalize_intraday_factor_payload(factor_name: str, factor_data: dict) -> t
     elif not isinstance(required_fields, list):
         errors.append("`required_fields` must be a list of strings")
         required_fields = []
+    required_fields = [
+        field if str(field).strip().startswith("$") else f"${str(field).strip()}"
+        for field in required_fields
+        if str(field).strip()
+    ]
 
     window_unit = str(factor_data.get("window_unit", "")).strip() or "bars"
     implementation_hints = str(factor_data.get("implementation_hints", "")).strip()
@@ -80,10 +103,27 @@ def _normalize_intraday_factor_payload(factor_name: str, factor_data: dict) -> t
         errors.append("`description` is required")
     if not formulation:
         errors.append("`formulation` is required")
+    if not expression_summary:
+        errors.append("`expression_summary` is required and must be a supported symbolic expression")
+    if expression_summary:
+        try:
+            from quantaalpha.intraday.sql_expr_compiler import build_m1_factor_sql
+
+            build_m1_factor_sql(expression_summary, "2024-01-01", "2024-01-02", "2024-01-03")
+        except Exception as exc:
+            errors.append(f"`expression_summary` is not supported by the current intraday DSL: {exc}")
     if len(data_sources) == 0:
-        errors.append("`data_sources` must name at least one supported table")
+        errors.append("`data_sources` must name at least one supported semantic source")
+    elif not set(str(source).strip() for source in data_sources).issubset(INTRADAY_SUPPORTED_SOURCES):
+        errors.append("`data_sources` must use supported semantic sources: bar/order_book/trade_flow")
     if len(required_fields) == 0:
         errors.append("`required_fields` must name at least one supported field")
+    else:
+        invalid_fields = sorted(
+            field for field in (str(field).strip() for field in required_fields) if field not in INTRADAY_SUPPORTED_FIELDS
+        )
+        if invalid_fields:
+            errors.append(f"`required_fields` contains unsupported DSL variables: {invalid_fields}")
     if window_unit.lower() not in {"bar", "bars", "bar_count", "bar_counts"}:
         errors.append("`window_unit` must explicitly indicate bars")
 
@@ -551,7 +591,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
                     normalized_payload, payload_errors = _normalize_intraday_factor_payload(factor_name, factor_data)
                     if payload_errors:
                         feedback_item = (
-                            f"- Factor `{factor_name}` has invalid intraday task schema: "
+                            f"- Factor `{factor_name}` has invalid intraday task definition: "
                             + "; ".join(payload_errors)
                         )
                         intraday_validation_prompt = (
@@ -735,7 +775,7 @@ class AlphaAgentHypothesis2FactorExpression(FactorHypothesis2Experiment):
                 normalized_payload, payload_errors = _normalize_intraday_factor_payload(factor_name, factor_data)
                 if payload_errors:
                     logger.warning(
-                        f"Skipping intraday factor `{factor_name}` because task schema is incomplete: {payload_errors}"
+                        f"Skipping intraday factor `{factor_name}` because task definition is incomplete: {payload_errors}"
                     )
                     continue
                 description = normalized_payload["description"]
