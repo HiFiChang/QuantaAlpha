@@ -4,7 +4,7 @@ potential_direction_transformation: |-
 
   Requirements:
   1. State the market mechanism, not just a generic alpha slogan.
-  2. Keep the logic grounded in intraday bars, order-book liquidity, and trade-flow concepts from the supported DSL.
+  2. Keep the logic grounded in intraday bars and order-book liquidity concepts from the supported DSL.
   3. Make the hypothesis actionable for factor generation within bar-based windows.
 
 hypothesis_and_feedback: |-
@@ -34,12 +34,12 @@ hypothesis_output_format: |-
 
 factor_hypothesis_specification: |-
   1. Build hypotheses strictly inside the supported intraday DSL.
-     - Prefer semantic variables for price-volume, order-book liquidity, and trade flow.
+     - Prefer semantic variables for price-volume and order-book liquidity.
      - Treat all rolling windows as bar counts, not days.
      - Do not assume large-order buckets, order IDs, macro, cross-asset, or external datasets.
 
   2. Preserve the market mechanism.
-     - Prefer mechanisms expressible with bar price-volume, top-of-book liquidity, and minute-aggregated trade-flow fields.
+     - Prefer mechanisms expressible with bar price-volume and top-of-book liquidity fields.
      - Do not propose a mechanism that cannot be expressed with the supported DSL variables and operators.
 
   3. Keep the hypothesis executable.
@@ -54,7 +54,6 @@ function_lib_description: |-
   Supported semantic variables:
   - Price-volume: `$open`, `$close`, `$high`, `$low`, `$volume`, `$money`, `$vwap`, `$return`
   - Order-book liquidity: `$bid1`...`$bid10`, `$ask1`...`$ask10`, `$bidv1`...`$bidv10`, `$askv1`...`$askv10`, `$last`, `$ztprice`, `$dtprice`, `$num_trades`, `$total_volume`, `$total_value`, `$spread`, `$relative_spread`, `$depth_imbalance_1`
-  - Trade flow: `$active_buy_amount`, `$active_sell_amount`, `$raw_flow_diff`, `$trade_imbalance_amount`
 
   Allowed operator families for symbolic expressions:
   - Cross-sectional: `RANK`, `ZSCORE`, `MEAN`, `STD` as the outermost function only
@@ -80,7 +79,7 @@ factor_experiment_output_format: |-
               "field or operator name 2": "description of field or operator 2"
           },
           "formulation": "A LaTeX-style formulation that preserves the intraday mechanism. Windows must be described in bars, not days.",
-          "data_sources": ["bar/order_book/trade_flow semantic source 1", "bar/order_book/trade_flow semantic source 2"],
+          "data_sources": ["bar/order_book semantic source 1", "bar/order_book semantic source 2"],
           "required_fields": ["required field 1", "required field 2"],
           "window_unit": "bars",
           "implementation_hints": "One concise sentence explaining the intended economic mechanism, without SQL or Python details.",
@@ -93,7 +92,7 @@ factor_experiment_output_format: |-
               "field or operator name 2": "description of field or operator 2"
           },
           "formulation": "A LaTeX-style formulation of factor 2",
-          "data_sources": ["bar/order_book/trade_flow semantic source 1"],
+          "data_sources": ["bar/order_book semantic source 1"],
           "required_fields": ["required field 1"],
           "window_unit": "bars",
           "implementation_hints": "brief mechanism-oriented implementation hint without SQL or Python details",
@@ -103,9 +102,9 @@ factor_experiment_output_format: |-
 
   Intraday-specific requirements:
   - Generate 1-2 factors only. Prefer quality over quantity.
-  - Preserve the core hypothesis mechanism exactly. If the hypothesis mentions queue recovery, aggressive flow, spread, depth imbalance, VWAP deviation, or same-session reversal, the factor description and formulation must still mention those concepts explicitly.
+  - Preserve the core hypothesis mechanism exactly. If the hypothesis mentions queue recovery, spread, depth imbalance, VWAP deviation, or same-session reversal, the factor description and formulation must still mention those concepts explicitly.
   - Do not silently convert a microstructure factor into a pure OHLCV factor unless the hypothesis itself is already OHLCV-only.
-  - `data_sources` must use only semantic source names: `bar`, `order_book`, `trade_flow`.
+  - `data_sources` must use only semantic source names: `bar`, `order_book`.
   - `required_fields` must explicitly list only whitelisted logical fields needed for implementation.
   - `window_unit` must always be `bars`.
   - Use bar-based language such as "2-bar", "3-bar", or "5-bar" windows.

@@ -12,7 +12,7 @@ evaluator_code_feedback_v1_system: |-
   4. Is the expression inside the supported DSL subset?
 
   Be strict about semantic drift:
-  - If the factor description is about queue recovery, aggressive flow, spread, depth imbalance, VWAP deviation, or same-session reversal, and the expression instead computes a generic price-only factor, that is a major issue.
+  - If the factor description is about queue recovery, spread, depth imbalance, VWAP deviation, or same-session reversal, and the expression instead computes a generic price-only factor, that is a major issue.
   - Minor window or normalization differences are acceptable only if the same intraday mechanism is preserved.
 
   Do not give the user line-by-line debugging instructions.
@@ -49,7 +49,7 @@ evolving_strategy_factor_implementation_v1_system: |-
   If a previous attempt drifted into a generic OHLCV factor, move it back toward the original intraday mechanism instead of polishing the wrong idea.
 
   Supported intraday factor DSL:
-  - Fields: `$open`, `$close`, `$high`, `$low`, `$volume`, `$money`, `$vwap`, `$return`, `$bid1`...`$bid10`, `$ask1`...`$ask10`, `$bidv1`...`$bidv10`, `$askv1`...`$askv10`, `$last`, `$ztprice`, `$dtprice`, `$num_trades`, `$total_volume`, `$total_value`, `$spread`, `$relative_spread`, `$depth_imbalance_1`, `$active_buy_amount`, `$active_sell_amount`, `$raw_flow_diff`, `$trade_imbalance_amount`
+  - Fields: `$open`, `$close`, `$high`, `$low`, `$volume`, `$money`, `$vwap`, `$return`, `$bid1`...`$bid10`, `$ask1`...`$ask10`, `$bidv1`...`$bidv10`, `$askv1`...`$askv10`, `$last`, `$ztprice`, `$dtprice`, `$num_trades`, `$total_volume`, `$total_value`, `$spread`, `$relative_spread`, `$depth_imbalance_1`
   - Operators: `+`, `-`, `*`, `/`
   - Functions: `ABS`, `LOG`, `SQRT`, `SIGN`, `EXP`, `INV`, `FLOOR`, `POW`, `MAX`, `MIN`, `DELAY`, `DELTA`, `TS_MEAN`, `TS_SUM`, `TS_STD`, `TS_VAR`, `TS_MIN`, `TS_MAX`, `TS_ZSCORE`, `TS_PCTCHANGE`, `RANK`, `ZSCORE`, `MEAN`, `STD`, `WHERE`, `FILTER`, `COUNT`, `SUMIF`
   - Conditions: comparisons `> < >= <= == !=` and logical `&& ||`
@@ -175,7 +175,6 @@ function_lib_description: |-
   Supported semantic variables:
   - `$open`, `$close`, `$high`, `$low`, `$volume`, `$money`, `$vwap`, `$return`
   - `$bid1`...`$bid10`, `$ask1`...`$ask10`, `$bidv1`...`$bidv10`, `$askv1`...`$askv10`, `$last`, `$ztprice`, `$dtprice`, `$num_trades`, `$total_volume`, `$total_value`, `$spread`, `$relative_spread`, `$depth_imbalance_1`
-  - `$active_buy_amount`, `$active_sell_amount`, `$raw_flow_diff`, `$trade_imbalance_amount`
 
   Supported operator families for symbolic expressions:
   - Cross-sectional: `RANK`, `ZSCORE`, `MEAN`, `STD` as the outermost function only

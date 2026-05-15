@@ -13,7 +13,7 @@ consistency_check_system: |-
 
   Intraday-specific rules:
   - Treat all rolling windows as bar counts, not days.
-  - Be strict about market-mechanism drift. If the hypothesis is about queue recovery, aggressive flow, spread, depth imbalance, VWAP deviation, or same-session reversal, do not accept a generic OHLCV proxy unless the description explicitly justifies that simplification.
+  - Be strict about market-mechanism drift. If the hypothesis is about queue recovery, spread, depth imbalance, VWAP deviation, or same-session reversal, do not accept a generic OHLCV proxy unless the description explicitly justifies that simplification.
   - Minor implementation differences are acceptable only when the same economic meaning is preserved.
 
   Output JSON:

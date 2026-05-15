@@ -7,6 +7,14 @@ from ruogu import trade_cal
 from quantaalpha.intraday.sql_expr_compiler import build_m1_factor_sql
 
 
+def _previous_trading_date_for_window(start_date: str) -> str:
+    trade_dates = trade_cal.range_date_list(start_date, start_date, check_open=False)
+    if not trade_dates:
+        raise ValueError(f"No trading date found on or after INTRADAY_ANALYSIS_START={start_date!r}")
+    first_analysis_date = trade_dates[0]
+    return str(trade_cal.pre_date(first_analysis_date)).split()[0]
+
+
 def calculate_factor(expr: str) -> pd.Series:
     token = os.environ.get("RUOGU_TOKEN")
     if token:
@@ -14,13 +22,19 @@ def calculate_factor(expr: str) -> pd.Series:
 
     analysis_start = os.environ["INTRADAY_ANALYSIS_START"]
     analysis_end = os.environ["INTRADAY_ANALYSIS_END"]
-    calc_start = str(trade_cal.pre_date(analysis_start)).split()[0]
+    slice_start = os.environ.get("INTRADAY_SLICE_START", "09:30:00")
+    slice_end = os.environ.get("INTRADAY_SLICE_END", "15:00:00")
+    calc_start = _previous_trading_date_for_window(analysis_start)
 
     sql = build_m1_factor_sql(
         expression=expr,
         calc_start=calc_start,
         analysis_start=analysis_start,
         analysis_end=analysis_end,
+        calc_time_start="09:30:00",
+        calc_time_end=slice_end,
+        output_time_start=slice_start,
+        output_time_end=slice_end,
     )
     df = rg.command_get_df(sql)
     if df.empty:

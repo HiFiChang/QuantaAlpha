@@ -36,15 +36,12 @@ loading, alignment, output formatting, and evaluation.
 Supported semantic source families:
 - `bar`: minute price-volume behavior
 - `order_book`: minute-aligned order-book liquidity
-- `trade_flow`: minute-aggregated active buy/sell flow
 
 Supported semantic variables:
 - Price-volume: $open, $close, $high, $low, $volume, $money, $vwap, $return
 - Order-book liquidity: $bid1...$bid10, $ask1...$ask10, $bidv1...$bidv10,
   $askv1...$askv10, $last, $ztprice, $dtprice, $num_trades, $total_volume,
   $total_value, $spread, $relative_spread, $depth_imbalance_1
-- Trade flow: $active_buy_amount, $active_sell_amount, $raw_flow_diff,
-  $trade_imbalance_amount
 
 Design at the factor-definition level. Do not mention backend query languages,
 Python, table names, joins, event filters, upload steps, or implementation
@@ -59,15 +56,12 @@ definitions expressed through the supported semantic variables and operators.
 Semantic source families:
 - `bar`: minute price-volume behavior
 - `order_book`: minute-aligned liquidity and queue state
-- `trade_flow`: minute active buy/sell pressure
 
 Semantic variables:
 - Price-volume: $open, $close, $high, $low, $volume, $money, $vwap, $return
 - Order-book liquidity: $bid1...$bid10, $ask1...$ask10, $bidv1...$bidv10,
   $askv1...$askv10, $last, $ztprice, $dtprice, $num_trades, $total_volume,
   $total_value, $spread, $relative_spread, $depth_imbalance_1
-- Trade flow: $active_buy_amount, $active_sell_amount, $raw_flow_diff,
-  $trade_imbalance_amount
 
 Use only these semantic variables in the executable expression. The backend
 will translate them to the required remote data operations.
@@ -91,8 +85,8 @@ to preserve the factor mechanism and provide an executable DSL expression.
 """.strip()
             self._rich_style_description = """
 Prefer concise, interpretable intraday factor expressions. Use semantic
-price-volume, order-book liquidity, and trade-flow variables directly; leave
-data access and optimization to the backend.
+price-volume and order-book liquidity variables directly; leave data access
+and optimization to the backend.
 """.strip()
         else:
             self._source_data_hypothesis = """
@@ -166,12 +160,10 @@ stories that require unavailable inputs.
 Current intraday planning must stay within the supported semantic DSL:
 - `bar`: minute price-volume behavior
 - `order_book`: minute-aligned liquidity and queue state
-- `trade_flow`: minute active buy/sell pressure
 
 Directions may use:
 - intraday price-volume dynamics
 - spread, relative spread, queue imbalance, and liquidity replenishment
-- active buy/sell amount imbalance and signed flow pressure
 - short-window reversal and liquidity replenishment
 
 Do not propose directions that require external macro or cross-asset datasets

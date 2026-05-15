@@ -38,10 +38,6 @@ FIELD_SQL = {
     "$spread": "spread",
     "$relative_spread": "relative_spread",
     "$depth_imbalance_1": "depth_imbalance_1",
-    "$active_buy_amount": "active_buy_amount",
-    "$active_sell_amount": "active_sell_amount",
-    "$raw_flow_diff": "raw_flow_diff",
-    "$trade_imbalance_amount": "trade_imbalance_amount",
 }
 for _level in range(2, 11):
     FIELD_SQL[f"$bid{_level}"] = f"bid{_level}"
@@ -71,18 +67,10 @@ TK_FIELDS = {
     "$relative_spread",
     "$depth_imbalance_1",
 }
-ZB_FIELDS = {
-    "$active_buy_amount",
-    "$active_sell_amount",
-    "$raw_flow_diff",
-    "$trade_imbalance_amount",
-}
-
-
 def _window(rows: int) -> str:
     if rows < 1:
         raise IntradaySqlExpressionError(f"Window must be positive, got {rows}")
-    return f"PARTITION BY code ORDER BY date_time ROWS BETWEEN {rows - 1} PRECEDING AND CURRENT ROW"
+    return f"PARTITION BY code, date ORDER BY date_time ROWS BETWEEN {rows - 1} PRECEDING AND CURRENT ROW"
 
 
 def _to_int_arg(arg: SqlExpr, func_name: str) -> int:
@@ -153,10 +141,14 @@ def _window_func(func_name: str, args: list[SqlExpr]) -> SqlExpr:
     source = args[0]
     rows = _to_int_arg(args[1], func_name)
     if func_name == "DELAY":
-        return SqlExpr(f"lagInFrame({source.sql}, {rows}) OVER (PARTITION BY code ORDER BY date_time)", source.fields, True)
+        return SqlExpr(
+            f"lagInFrame({source.sql}, {rows}) OVER (PARTITION BY code, date ORDER BY date_time)",
+            source.fields,
+            True,
+        )
     if func_name == "DELTA":
         return SqlExpr(
-            f"(({source.sql}) - lagInFrame({source.sql}, {rows}) OVER (PARTITION BY code ORDER BY date_time))",
+            f"(({source.sql}) - lagInFrame({source.sql}, {rows}) OVER (PARTITION BY code, date ORDER BY date_time))",
             source.fields,
             True,
         )
@@ -173,7 +165,7 @@ def _window_func(func_name: str, args: list[SqlExpr]) -> SqlExpr:
     if func_name == "TS_MAX":
         return SqlExpr(f"max({source.sql}) OVER ({_window(rows)})", source.fields, True)
     if func_name == "TS_PCTCHANGE":
-        lag_sql = f"lagInFrame({source.sql}, {rows}) OVER (PARTITION BY code ORDER BY date_time)"
+        lag_sql = f"lagInFrame({source.sql}, {rows}) OVER (PARTITION BY code, date ORDER BY date_time)"
         return SqlExpr(f"(({source.sql}) / nullIf({lag_sql}, 0) - 1)", source.fields, True)
     if func_name == "TS_ZSCORE":
         mean_sql = f"avg({source.sql}) OVER ({_window(rows)})"
@@ -336,7 +328,16 @@ def compile_factor_sql(expression: str) -> SqlExpr:
     return parsed
 
 
-def build_m1_factor_sql(expression: str, calc_start: str, analysis_start: str, analysis_end: str) -> str:
+def build_m1_factor_sql(
+    expression: str,
+    calc_start: str,
+    analysis_start: str,
+    analysis_end: str,
+    calc_time_start: str = "09:30:00",
+    calc_time_end: str = "15:00:00",
+    output_time_start: str = "09:30:00",
+    output_time_end: str = "15:00:00",
+) -> str:
     compiled = compile_factor_sql(expression)
     factor_sql = compiled.sql
     required_fields = compiled.fields
@@ -364,8 +365,6 @@ def build_m1_factor_sql(expression: str, calc_start: str, analysis_start: str, a
         raise IntradaySqlExpressionError("Cross-sectional functions are only supported as the outermost expression function")
 
     needs_tk = bool(required_fields & TK_FIELDS)
-    needs_zb = bool(required_fields & ZB_FIELDS)
-
     extra_selects: list[str] = []
     tk_cte = ""
     tk_join = ""
@@ -401,8 +400,8 @@ tk_last AS (
         FROM stock_base.tk
         WHERE date >= toDate('{calc_start}')
           AND date <= toDate('{analysis_end}')
-          AND time_int >= Tit('09:30:00')
-          AND time_int <= Tit('15:00:00')
+          AND time_int >= Tit('{calc_time_start}')
+          AND time_int <= Tit('{calc_time_end}')
     )
     GROUP BY bar_time, date, code
 ),
@@ -420,47 +419,6 @@ tk_bar AS (
         tk_join = """
     LEFT JOIN tk_bar USING (date_time, date, code)"""
 
-    zb_cte = ""
-    zb_join = ""
-    if needs_zb:
-        extra_selects.extend(
-            [
-                "zb_bar.active_buy_amount AS active_buy_amount",
-                "zb_bar.active_sell_amount AS active_sell_amount",
-                "zb_bar.raw_flow_diff AS raw_flow_diff",
-                "zb_bar.trade_imbalance_amount AS trade_imbalance_amount",
-            ]
-        )
-        zb_cte = f""",
-zb_bar AS (
-    SELECT
-        bar_time AS date_time,
-        date,
-        code,
-        sumIf(price * volume, side = 'B') AS active_buy_amount,
-        sumIf(price * volume, side = 'S') AS active_sell_amount,
-        sumIf(price * volume, side = 'B') - sumIf(price * volume, side = 'S') AS raw_flow_diff,
-        (sumIf(price * volume, side = 'B') - sumIf(price * volume, side = 'S')) / nullIf(sumIf(price * volume, side = 'B') + sumIf(price * volume, side = 'S'), 0) AS trade_imbalance_amount
-    FROM (
-        SELECT
-            toStartOfMinute(date_time) AS bar_time,
-            date,
-            code,
-            price,
-            volume,
-            side
-        FROM stock_base.zb
-        WHERE date >= toDate('{calc_start}')
-          AND date <= toDate('{analysis_end}')
-          AND time_int >= Tit('09:30:00')
-          AND time_int <= Tit('15:00:00')
-          AND ctype = '5'
-    )
-    GROUP BY bar_time, date, code
-)"""
-        zb_join = """
-    LEFT JOIN zb_bar USING (date_time, date, code)"""
-
     extra_select_sql = ""
     if extra_selects:
         extra_select_sql = ",\n        " + ",\n        ".join(extra_selects)
@@ -469,6 +427,7 @@ zb_bar AS (
 WITH m1_base AS (
     SELECT
         date_time,
+        time_int,
         date,
         code,
         open,
@@ -478,16 +437,17 @@ WITH m1_base AS (
         volume,
         amount AS money,
         amount / nullIf(volume, 0) AS vwap,
-        (close / nullIf(lagInFrame(close, 1) OVER (PARTITION BY code ORDER BY date_time), 0) - 1) AS return_value
+        (close / nullIf(lagInFrame(close, 1) OVER (PARTITION BY code, date ORDER BY date_time), 0) - 1) AS return_value
     FROM stock_base.m1
     WHERE date >= toDate('{calc_start}')
       AND date <= toDate('{analysis_end}')
-      AND time_int >= Tit('09:30:00')
-      AND time_int <= Tit('15:00:00')
-){tk_cte}{zb_cte},
+      AND time_int >= Tit('{calc_time_start}')
+      AND time_int <= Tit('{calc_time_end}')
+){tk_cte},
 base AS (
     SELECT
         m1_base.date_time AS date_time,
+        m1_base.time_int AS time_int,
         m1_base.date AS date,
         m1_base.code AS code,
         m1_base.open AS open,
@@ -498,11 +458,12 @@ base AS (
         m1_base.money AS money,
         m1_base.vwap AS vwap,
         m1_base.return_value AS return_value{extra_select_sql}
-    FROM m1_base{tk_join}{zb_join}
+    FROM m1_base{tk_join}
 ),
 calc AS (
     SELECT
         date_time,
+        time_int,
         date,
         code,
         {factor_sql} AS factor_raw
@@ -516,6 +477,8 @@ factor_output AS (
     FROM calc
     WHERE date >= toDate('{calc_start}')
       AND date <= toDate('{analysis_end}')
+      AND time_int >= Tit('{output_time_start}')
+      AND time_int <= Tit('{output_time_end}')
 )
 SELECT
     toString(date_time) AS datetime,

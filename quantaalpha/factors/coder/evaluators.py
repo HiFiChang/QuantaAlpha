@@ -22,6 +22,10 @@ FactorSingleFeedback = CoSTEERSingleFeedback
 FactorMultiFeedback = CoSTEERMultiFeedback
 
 
+def _is_intraday_scenario(scen) -> bool:
+    return scen is not None and scen.__class__.__module__.startswith("quantaalpha.intraday")
+
+
 class FactorEvaluatorForCoder(CoSTEEREvaluator):
     """This class is the v1 version of evaluator for a single factor implementation.
     It calls several evaluators in share modules to evaluate the factor implementation.
@@ -39,6 +43,13 @@ class FactorEvaluatorForCoder(CoSTEEREvaluator):
         duplication_threshold = duplication_threshold if duplication_threshold is not None else FACTOR_COSTEER_SETTINGS.duplication_threshold
         symbol_length_threshold = getattr(FACTOR_COSTEER_SETTINGS, 'symbol_length_threshold', 300)
         base_features_threshold = getattr(FACTOR_COSTEER_SETTINGS, 'base_features_threshold', 6)
+        if _is_intraday_scenario(self.scen):
+            base_features_threshold = getattr(
+                FACTOR_COSTEER_SETTINGS,
+                'intraday_base_features_threshold',
+                max(base_features_threshold, 10),
+            )
+        self.ast_regularization_enabled = getattr(FACTOR_COSTEER_SETTINGS, 'ast_regularization_enabled', True)
         self.factor_regulator = FactorRegulator(
             factor_zoo_path=factor_zoo_path,
             duplication_threshold=duplication_threshold,
@@ -58,6 +69,9 @@ class FactorEvaluatorForCoder(CoSTEEREvaluator):
     def check_ast_regularization(self, implementation: Workspace) -> tuple[bool, str]:
         """Check if factor expression meets AST regularization. Returns (ok, feedback)."""
         try:
+            if not self.ast_regularization_enabled:
+                return True, "AST Regularization Check Skipped: disabled by config"
+
             if hasattr(implementation, 'code_dict') and 'factor.py' in implementation.code_dict:
                 code = implementation.code_dict['factor.py']
             elif hasattr(implementation, 'code'):

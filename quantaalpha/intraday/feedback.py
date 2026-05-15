@@ -286,7 +286,11 @@ def _build_complexity_feedback(task_detail: dict[str, Any]) -> str | None:
             )
 
         num_base_features = count_base_features(factor_expr)
-        base_features_threshold = getattr(FACTOR_COSTEER_SETTINGS, "base_features_threshold", 6)
+        base_features_threshold = getattr(
+            FACTOR_COSTEER_SETTINGS,
+            "intraday_base_features_threshold",
+            max(getattr(FACTOR_COSTEER_SETTINGS, "base_features_threshold", 6), 10),
+        )
         if num_base_features > base_features_threshold:
             warnings.append(
                 f"Base Features Count (ER) Check Failed: base feature count {num_base_features} exceeds threshold {base_features_threshold}."

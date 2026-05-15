@@ -28,14 +28,10 @@ INTRADAY_SUPPORTED_SOURCES = {
     "order_book",
     "snapshot",
     "liquidity",
-    "trade_flow",
-    "flow",
     "m1",
     "stock_base.m1",
     "tk",
     "stock_base.tk",
-    "zb",
-    "stock_base.zb",
 }
 INTRADAY_SUPPORTED_FIELDS = set(FIELD_SQL)
 
@@ -115,7 +111,7 @@ def _normalize_intraday_factor_payload(factor_name: str, factor_data: dict) -> t
     if len(data_sources) == 0:
         errors.append("`data_sources` must name at least one supported semantic source")
     elif not set(str(source).strip() for source in data_sources).issubset(INTRADAY_SUPPORTED_SOURCES):
-        errors.append("`data_sources` must use supported semantic sources: bar/order_book/trade_flow")
+        errors.append("`data_sources` must use supported semantic sources: bar/order_book")
     if len(required_fields) == 0:
         errors.append("`required_fields` must name at least one supported field")
     else:

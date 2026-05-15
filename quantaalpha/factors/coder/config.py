@@ -44,5 +44,13 @@ class FactorCoSTEERSettings(CoSTEERSettings):
     Base features are raw variables like $close, $open, $high, $low, $volume.
     Expressions using more than this number of distinct base features will be rejected."""
 
+    intraday_base_features_threshold: int = 10
+    """Maximum allowed number of unique base features for intraday expressions.
+    Order-book factors often need symmetric bid/ask levels, so the daily OHLCV
+    threshold is too strict for intraday microstructure signals."""
+
+    ast_regularization_enabled: bool = True
+    """Whether to run AST regularization before executing generated factor code."""
+
 
 FACTOR_COSTEER_SETTINGS = FactorCoSTEERSettings()
